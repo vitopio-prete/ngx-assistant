@@ -27,18 +27,42 @@ factories run in the injection context, so an adapter can `inject()` what it nee
 once, when the runtime is first injected. Destroying the injector aborts the running stream and
 ends voice, dictation and speech.
 
+`provideExternalStoreRuntime(adapter)` keeps the messages in your own store: the runtime reads
+them from the adapter and calls `onNew`, `onEdit`, `onReload`, `onCancel`… for you to update the
+store. `adapter` can be an adapter, a `Signal` of one, or a factory returning either, run once in
+the injection context. Return a `computed` from the factory to keep the runtime in sync with your
+signals: each new adapter is handed to the runtime by an effect, at the next change detection. A
+plain adapter is read once, even if the factory read signals to build it.
+
+```ts
+providers: [
+  provideExternalStoreRuntime(() => {
+    const store = inject(ChatStore);
+    return computed(() => ({
+      messages: store.messages(),
+      isRunning: store.isRunning(),
+      onNew: (message) => store.send(message),
+    }));
+  }),
+];
+```
+
+Destroying the injector fences the thread's in-flight work, such as an attachment upload still
+pending, and ends voice, dictation and speech. It does not call `onCancel`: a run in your store goes
+on until you stop it.
+
 ## Scopes
 
 Each runtime lives in a scope of the injector tree, and `inject*()` returns the nearest one:
 
-| Function             | Token            | Provided by                                                        |
-| -------------------- | ---------------- | ------------------------------------------------------------------ |
-| `injectAssistant()`  | `NXA_ASSISTANT`  | `provideLocalRuntime(...)`, `provideAssistantScope(() => runtime)` |
-| `injectThread()`     | `NXA_THREAD`     | `provideLocalRuntime(...)`                                         |
-| `injectComposer()`   | `NXA_COMPOSER`   | the runtime (thread composer) or a message                         |
-| `injectMessage()`    | `NXA_MESSAGE`    | `provideMessageScope(() => message)`                               |
-| `injectPart()`       | `NXA_PART`       | `providePartScope(() => part)`                                     |
-| `injectAttachment()` | `NXA_ATTACHMENT` | `provideAttachmentScope(() => attachment)`                         |
+| Function             | Token            | Provided by                                                |
+| -------------------- | ---------------- | ---------------------------------------------------------- |
+| `injectAssistant()`  | `NXA_ASSISTANT`  | a runtime provider, `provideAssistantScope(() => runtime)` |
+| `injectThread()`     | `NXA_THREAD`     | a runtime provider                                         |
+| `injectComposer()`   | `NXA_COMPOSER`   | the runtime (thread composer) or a message                 |
+| `injectMessage()`    | `NXA_MESSAGE`    | `provideMessageScope(() => message)`                       |
+| `injectPart()`       | `NXA_PART`       | `providePartScope(() => part)`                             |
+| `injectAttachment()` | `NXA_ATTACHMENT` | `provideAttachmentScope(() => attachment)`                 |
 
 Inside a message scope `injectComposer()` returns the message's edit composer; the thread composer
 stays reachable as `injectThread().composer`. A missing scope throws, unless you pass
