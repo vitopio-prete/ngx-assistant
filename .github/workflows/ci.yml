@@ -76,6 +76,9 @@ jobs:
       - name: Engine loads as plain Node ESM
         run: pnpm run smoke
 
+      - name: Demo end-to-end (send, streaming, stop)
+        run: pnpm run e2e
+
       - name: Package copies of LICENSE and NOTICE match the root
         run: |
           for p in engine angular; do
