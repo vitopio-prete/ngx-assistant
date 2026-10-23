@@ -50,6 +50,9 @@ export {
 export { fromThreadMessageLike } from "./utils/thread-message-like";
 export { symbolInnerMessage } from "./utils/external-store-message";
 export { isAutoStatus, getAutoStatus } from "./utils/auto-status";
+// Bindings that drop a thread runtime for good fence its in-flight work and end
+// its media sessions with this.
+export { disposeThreadRuntime } from "./utils/thread-runtime-lifecycle";
 
 export {
   ExportedMessageRepository,
