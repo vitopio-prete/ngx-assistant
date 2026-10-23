@@ -1,0 +1,19 @@
+{
+  "name": "@ngx-assistant/angular",
+  "version": "0.0.0",
+  "description": "Angular signals bindings and headless primitives for ngx-assistant",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vitopio-prete/ngx-assistant.git",
+    "directory": "packages/angular"
+  },
+  "peerDependencies": {
+    "@angular/common": "^22.2.0",
+    "@angular/core": "^22.2.0"
+  },
+  "dependencies": {
+    "tslib": "^2.3.0"
+  },
+  "sideEffects": false
+}
