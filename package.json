@@ -4,7 +4,8 @@
   "scripts": {
     "ng": "ng",
     "prepare": "lefthook install",
-    "build": "pnpm --filter @ngx-assistant/engine build && ng build @ngx-assistant/angular",
+    "dev": "pnpm --filter @ngx-assistant/engine build && ng serve demo",
+    "build": "pnpm --filter @ngx-assistant/engine build && ng build @ngx-assistant/angular && ng build demo",
     "test": "pnpm --filter @ngx-assistant/engine test && ng test @ngx-assistant/angular --watch=false",
     "typecheck": "pnpm --filter @ngx-assistant/engine typecheck",
     "smoke": "pnpm --filter @ngx-assistant/engine smoke",
@@ -32,6 +33,7 @@
     "@commitlint/config-conventional": "^21.2.4",
     "@commitlint/types": "^21.2.3",
     "@eslint/js": "^10.0.1",
+    "@ngx-assistant/engine": "workspace:*",
     "angular-eslint": "22.6.0",
     "eslint": "^10.12.0",
     "jsdom": "^30.0.0",
