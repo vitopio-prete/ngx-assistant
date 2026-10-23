@@ -1,0 +1,121 @@
+import type { Attachment, CompleteAttachment } from "../../types/attachment";
+import type { Unsubscribe } from "../../types/unsubscribe";
+import type { SubscribableWithState } from "../../subscribable/subscribable";
+
+import type { ComposerRuntimeCoreBinding } from "./bindings";
+import type { AttachmentRuntimePath } from "./paths";
+
+type MessageAttachmentState = CompleteAttachment & {
+  readonly source: "message";
+};
+
+type ThreadComposerAttachmentState = Attachment & {
+  readonly source: "thread-composer";
+};
+
+type EditComposerAttachmentState = Attachment & {
+  readonly source: "edit-composer";
+};
+
+export type AttachmentRuntimeState =
+  | ThreadComposerAttachmentState
+  | EditComposerAttachmentState
+  | MessageAttachmentState;
+
+/**
+ * @deprecated Use `AttachmentRuntimeState`.
+ */
+export type AttachmentState = AttachmentRuntimeState;
+
+type AttachmentSnapshotBinding<Source extends AttachmentRuntimeSource> =
+  SubscribableWithState<
+    AttachmentRuntimeState & { source: Source },
+    AttachmentRuntimePath & { attachmentSource: Source }
+  >;
+
+type AttachmentRuntimeSource = AttachmentRuntimeState["source"];
+
+export type AttachmentRuntime<
+  TSource extends AttachmentRuntimeSource = AttachmentRuntimeSource,
+> = {
+  readonly path: AttachmentRuntimePath & { attachmentSource: TSource };
+  readonly source: TSource;
+  getState(): AttachmentRuntimeState & { source: TSource };
+  remove(): Promise<void>;
+  subscribe(callback: () => void): Unsubscribe;
+};
+
+export abstract class AttachmentRuntimeImpl<
+  Source extends AttachmentRuntimeSource = AttachmentRuntimeSource,
+> implements AttachmentRuntime {
+  public get path() {
+    return this._core.path;
+  }
+
+  public abstract get source(): Source;
+
+  private _core: AttachmentSnapshotBinding<Source>;
+
+  constructor(_core: AttachmentSnapshotBinding<Source>) {
+    this._core = _core;
+    this.__internal_bindMethods();
+  }
+
+  protected __internal_bindMethods() {
+    this.getState = this.getState.bind(this);
+    this.remove = this.remove.bind(this);
+    this.subscribe = this.subscribe.bind(this);
+  }
+
+  public getState(): AttachmentRuntimeState & { source: Source } {
+    return this._core.getState();
+  }
+
+  public abstract remove(): Promise<void>;
+
+  public subscribe(callback: () => void) {
+    return this._core.subscribe(callback);
+  }
+}
+
+abstract class ComposerAttachmentRuntime<
+  Source extends "thread-composer" | "edit-composer",
+> extends AttachmentRuntimeImpl<Source> {
+  private _composerApi: ComposerRuntimeCoreBinding;
+
+  constructor(
+    core: AttachmentSnapshotBinding<Source>,
+    _composerApi: ComposerRuntimeCoreBinding,
+  ) {
+    super(core);
+    this._composerApi = _composerApi;
+  }
+
+  public remove() {
+    const core = this._composerApi.getState();
+    if (!core) throw new Error("Composer is not available");
+    return core.removeAttachment(this.getState().id);
+  }
+}
+
+export class ThreadComposerAttachmentRuntimeImpl extends ComposerAttachmentRuntime<"thread-composer"> {
+  public get source(): "thread-composer" {
+    return "thread-composer";
+  }
+}
+
+export class EditComposerAttachmentRuntimeImpl extends ComposerAttachmentRuntime<"edit-composer"> {
+  public get source(): "edit-composer" {
+    return "edit-composer";
+  }
+}
+
+export class MessageAttachmentRuntimeImpl extends AttachmentRuntimeImpl<"message"> {
+  public get source(): "message" {
+    return "message";
+  }
+
+  public remove(): never {
+    throw new Error("Message attachments cannot be removed");
+  }
+}

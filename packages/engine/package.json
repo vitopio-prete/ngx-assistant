@@ -1,0 +1,47 @@
+{
+  "name": "@ngx-assistant/engine",
+  "version": "0.0.0",
+  "description": "Framework-agnostic chat runtime for ngx-assistant",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vitopio-prete/ngx-assistant.git",
+    "directory": "packages/engine"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts",
+    "!src/tests",
+    "NOTICE",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.lib.json && tsc-alias -p tsconfig.lib.json --resolve-full-paths",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json",
+    "smoke": "node --input-type=module -e \"const e = await import('@ngx-assistant/engine'); if (typeof e.LocalRuntimeCore !== 'function') throw new Error('LocalRuntimeCore missing');\""
+  },
+  "dependencies": {
+    "assistant-stream": "^0.3.53",
+    "nanoid": "^6.0.2"
+  },
+  "devDependencies": {
+    "@tsconfig/strictest": "^2.0.8",
+    "@types/node": "^22.19.0",
+    "tsc-alias": "^1.9.9",
+    "typescript": "~6.0.2",
+    "vitest": "^5.0.5",
+    "zod": "^4.6.7"
+  }
+}

@@ -1,0 +1,190 @@
+import type { Unsubscribe } from "../types/unsubscribe";
+import type { Tool } from "assistant-stream";
+import { nullProtoRecord } from "../utils/record";
+
+export type LanguageModelV1CallSettings = {
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
+  presencePenalty?: number;
+  frequencyPenalty?: number;
+  seed?: number;
+  headers?: Record<string, string | undefined>;
+};
+
+export type LanguageModelConfig = {
+  apiKey?: string;
+  baseUrl?: string;
+  modelName?: string;
+  reasoningEffort?: string;
+};
+
+export type ModelContext = {
+  priority?: number | undefined;
+  system?: string | undefined;
+  tools?: Record<string, Tool<any, any>> | undefined;
+  callSettings?: LanguageModelV1CallSettings | undefined;
+  config?: LanguageModelConfig | undefined;
+  /**
+   * Persisted message metadata pulled at send time and merged into the outgoing
+   * user message's `metadata.custom` (not forwarded to the model directly).
+   * Ignored by the transport, which only reads system/tools/callSettings/config.
+   *
+   * @deprecated Experimental since 2026-06-23. Not scheduled for removal; the API may change in any release.
+   */
+  unstable_composerMetadata?: Record<string, unknown> | undefined;
+};
+
+export type ModelContextProvider = {
+  getModelContext: () => ModelContext;
+  subscribe?: (callback: () => void) => Unsubscribe;
+};
+
+export type AssistantToolProps<
+  TArgs extends Record<string, unknown>,
+  TResult,
+> = Tool<TArgs, TResult> & {
+  toolName: string;
+  render?: unknown;
+};
+
+export type AssistantInstructionsConfig = {
+  disabled?: boolean | undefined;
+  instruction: string;
+};
+
+export type AssistantContextConfig = {
+  getContext: () => string;
+  disabled?: boolean | undefined;
+};
+
+export type SystemPart = {
+  system: string;
+  priority: number;
+};
+
+export type ModelContextOptions = {
+  maxSystemLength?: number | undefined;
+  mergeSystem?: ((parts: readonly SystemPart[]) => string) | undefined;
+};
+
+const SYSTEM_SEPARATOR = "\n\n";
+
+const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff;
+
+const capSystem = (parts: readonly SystemPart[], maxLength: number) => {
+  let result = "";
+  for (const { system } of parts) {
+    const separator = result ? SYSTEM_SEPARATOR : "";
+    const room = maxLength - result.length - separator.length;
+    const end =
+      room < system.length && isHighSurrogate(system.charCodeAt(room - 1))
+        ? room - 1
+        : room;
+    if (end <= 0) break;
+    result += separator + system.slice(0, end);
+    if (system.length > end) break;
+  }
+  return result;
+};
+
+const mergeSystem = (
+  parts: readonly SystemPart[],
+  options: ModelContextOptions,
+) => {
+  if (options.mergeSystem) {
+    if (options.maxSystemLength !== undefined) {
+      throw new Error(
+        "Pass either maxSystemLength or mergeSystem, not both. Apply the cap inside mergeSystem instead.",
+      );
+    }
+    return options.mergeSystem(parts);
+  }
+  if (options.maxSystemLength !== undefined)
+    return capSystem(parts, options.maxSystemLength);
+  return parts.map((part) => part.system).join(SYSTEM_SEPARATOR);
+};
+
+const stripOverwrite = (tool: Tool<any, any>): Tool<any, any> => {
+  if (!tool.overwrite) return tool;
+  const { overwrite: _, ...rest } = tool;
+  return rest as Tool<any, any>;
+};
+
+export const mergeModelContexts = (
+  configSet: Set<ModelContextProvider>,
+  options: ModelContextOptions = {},
+): ModelContext => {
+  const configs = Array.from(configSet)
+    .map((c) => c.getModelContext())
+    .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+
+  const toolPriorities = nullProtoRecord<number>();
+  const systemParts: SystemPart[] = [];
+
+  const merged = configs.reduce((acc, config) => {
+    const priority = config.priority ?? 0;
+    if (config.system) {
+      systemParts.push({ system: config.system, priority });
+    }
+    if (config.tools) {
+      for (const [name, tool] of Object.entries(config.tools)) {
+        const hasExisting =
+          acc.tools !== undefined && Object.hasOwn(acc.tools, name);
+        const existing = hasExisting ? acc.tools![name] : undefined;
+        if (existing && existing !== tool) {
+          const existingPriority = toolPriorities[name]!;
+          if (existingPriority === priority) {
+            if (!tool.overwrite) {
+              throw new Error(
+                `You tried to define a tool with the name ${name}, but it already exists.`,
+              );
+            }
+            acc.tools![name] = stripOverwrite(tool);
+            continue;
+          }
+
+          const higherPriorityTool =
+            existingPriority > priority ? existing : tool;
+          const lowerPriorityTool =
+            existingPriority > priority ? tool : existing;
+          acc.tools![name] = stripOverwrite({
+            ...lowerPriorityTool,
+            ...higherPriorityTool,
+          } as Tool<any, any>);
+          toolPriorities[name] = Math.max(existingPriority, priority);
+          continue;
+        }
+
+        if (!acc.tools) acc.tools = nullProtoRecord();
+        acc.tools[name] = stripOverwrite(tool);
+        if (!Object.hasOwn(toolPriorities, name)) {
+          toolPriorities[name] = priority;
+        }
+      }
+    }
+    if (config.config) {
+      acc.config = {
+        ...config.config,
+        ...acc.config,
+      };
+    }
+    if (config.callSettings) {
+      acc.callSettings = {
+        ...config.callSettings,
+        ...acc.callSettings,
+      };
+    }
+    if (config.unstable_composerMetadata) {
+      acc.unstable_composerMetadata = {
+        ...config.unstable_composerMetadata,
+        ...acc.unstable_composerMetadata,
+      };
+    }
+    return acc;
+  }, {} as ModelContext);
+
+  const system = mergeSystem(systemParts, options);
+  if (system) merged.system = system;
+  return merged;
+};

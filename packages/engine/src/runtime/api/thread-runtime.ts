@@ -1,0 +1,634 @@
+import type {
+  ThreadSuggestion,
+  RuntimeCapabilities,
+  ThreadRuntimeCore,
+  SpeechState,
+  VoiceSessionState,
+  ThreadRuntimeEventCallback,
+  ThreadRuntimeEventType,
+  StartRunConfig,
+  ResumeRunConfig,
+} from "../interfaces/thread-runtime-core";
+import type { ExportedMessageRepository } from "../utils/message-repository";
+import type { ThreadMessageLike } from "../utils/thread-message-like";
+import {
+  type MessageRuntime,
+  MessageRuntimeImpl,
+  type MessageRuntimeState,
+} from "./message-runtime";
+import { NestedSubscriptionSubject } from "../../subscribable/subscribable";
+import {
+  runCleanups,
+  ShallowMemoizeSubject,
+  SKIP_UPDATE,
+} from "../../subscribable/subscribable";
+import type { SubscribableWithState } from "../../subscribable/subscribable";
+import {
+  type ThreadComposerRuntime,
+  ThreadComposerRuntimeImpl,
+} from "./composer-runtime";
+import type {
+  MessageRuntimePath,
+  ThreadListItemRuntimePath,
+  ThreadRuntimePath,
+} from "./paths";
+import type { ThreadListItemRuntimeState } from "./bindings";
+import type { AppendMessage, ThreadMessage } from "../../types/message";
+import type { Unsubscribe } from "../../types/unsubscribe";
+import { reportRunFailure } from "../../utils/report-run-failure";
+import type { RunConfig } from "../../types/message";
+import { EventSubscriptionSubject } from "../../subscribable/subscribable";
+import { symbolInnerMessage } from "../utils/external-store-message";
+import { toAppendMessage } from "../utils/append-message";
+import type { ModelContext } from "../../model-context/types";
+import type {
+  ChatModelRunOptions,
+  ChatModelRunResult,
+} from "../utils/chat-model-adapter";
+import type { ReadonlyJSONValue } from "assistant-stream/utils";
+
+export type CreateStartRunConfig = {
+  parentId: string | null;
+  sourceId?: string | null | undefined;
+  runConfig?: RunConfig | undefined;
+};
+
+export type CreateResumeRunConfig = CreateStartRunConfig & {
+  stream?: (
+    options: ChatModelRunOptions,
+  ) => AsyncGenerator<ChatModelRunResult, void, unknown>;
+};
+
+const toResumeRunConfig = (message: CreateResumeRunConfig): ResumeRunConfig => {
+  return {
+    parentId: message.parentId ?? null,
+    sourceId: message.sourceId ?? null,
+    runConfig: message.runConfig ?? {},
+    ...(message.stream ? { stream: message.stream } : {}),
+  };
+};
+
+const toStartRunConfig = (message: CreateStartRunConfig): StartRunConfig => {
+  return {
+    parentId: message.parentId ?? null,
+    sourceId: message.sourceId ?? null,
+    runConfig: message.runConfig ?? {},
+  };
+};
+
+export type CreateAppendMessage =
+  | string
+  | {
+      /**
+       * An omitted value or `undefined` selects the current tail.
+       * `null` selects a root branch.
+       */
+      parentId?: string | null | undefined;
+      sourceId?: string | null | undefined;
+      role?: AppendMessage["role"] | undefined;
+      content: AppendMessage["content"];
+      attachments?: AppendMessage["attachments"] | undefined;
+      metadata?: AppendMessage["metadata"] | undefined;
+      createdAt?: Date | undefined;
+      runConfig?: AppendMessage["runConfig"] | undefined;
+      startRun?: boolean | undefined;
+    };
+
+export type ThreadRuntimeCoreBinding = SubscribableWithState<
+  ThreadRuntimeCore,
+  ThreadRuntimePath
+> & {
+  outerSubscribe(callback: () => void): Unsubscribe;
+};
+
+export type ThreadListItemRuntimeBinding = SubscribableWithState<
+  ThreadListItemRuntimeState,
+  ThreadListItemRuntimePath
+>;
+
+export type ThreadRuntimeState = {
+  /**
+   * The thread ID.
+   * @deprecated Use the thread list item's `id` instead.
+   */
+  readonly threadId: string;
+
+  /**
+   * The thread metadata.
+   *
+   * @deprecated Use the thread list item state instead.
+   */
+  readonly metadata: ThreadListItemRuntimeState;
+
+  /**
+   * Whether typing into the composer, adding attachments, sending, and editing messages are disabled for the thread.
+   */
+  readonly isDisabled: boolean;
+
+  /**
+   * Whether the runtime's send policy disables composer sends, apart from whether the current draft is ready.
+   */
+  readonly isSendDisabled: boolean;
+
+  /**
+   * Whether the thread is loading its history.
+   */
+  readonly isLoading: boolean;
+
+  /**
+   * Whether messages exist before the first loaded one, for a runtime that pages long threads.
+   */
+  readonly hasEarlier: boolean;
+
+  /**
+   * Whether the page before the first loaded message is being loaded.
+   */
+  readonly isLoadingEarlier: boolean;
+
+  /**
+   * Whether the thread is running. A thread is considered running when there is an active stream connection to the backend.
+   */
+  readonly isRunning: boolean;
+  /** Whether the adapter can resume the current interrupted run from its checkpoint. */
+  readonly canResume: boolean;
+
+  /**
+   * The capabilities of the thread, such as whether the thread supports editing, branch switching, etc.
+   */
+  readonly capabilities: RuntimeCapabilities;
+
+  /**
+   * The messages in the currently selected branch of the thread.
+   */
+  readonly messages: readonly ThreadMessage[];
+
+  /**
+   * The thread state.
+   *
+   * @deprecated Experimental since 2024-04-21. Not scheduled for removal; the API may change in any release.
+   */
+  readonly state: ReadonlyJSONValue;
+
+  /**
+   * Follow up message suggestions to show the user.
+   */
+  readonly suggestions: readonly ThreadSuggestion[];
+
+  /**
+   * Custom extra information provided by the runtime.
+   */
+  readonly extras: unknown;
+
+  /**
+   * @deprecated Experimental since 2024-09-01. Not scheduled for removal; the API may change in any release.
+   */
+  readonly speech: SpeechState | undefined;
+
+  readonly voice: VoiceSessionState | undefined;
+};
+
+/**
+ * @deprecated Use `ThreadRuntimeState`.
+ */
+export type ThreadState = ThreadRuntimeState;
+
+/**
+ * The canonical `isRunning` derivation. A runtime that tracks run state itself
+ * reports it directly; the rest fall back to the trailing assistant message.
+ */
+export const getThreadRuntimeCoreIsRunning = (
+  runtime: Pick<ThreadRuntimeCore, "isRunning" | "messages">,
+): boolean => {
+  if (runtime.isRunning !== undefined) return runtime.isRunning;
+  const lastMessage = runtime.messages.at(-1);
+  return (
+    lastMessage?.role === "assistant" && lastMessage.status.type === "running"
+  );
+};
+
+export const getThreadState = (
+  runtime: ThreadRuntimeCore,
+  threadListItemState: ThreadListItemRuntimeState,
+): ThreadRuntimeState => {
+  return Object.freeze({
+    threadId: threadListItemState.id,
+    metadata: threadListItemState,
+    capabilities: runtime.capabilities,
+    isDisabled: runtime.isDisabled,
+    isSendDisabled: runtime.isSendDisabled,
+    isLoading: runtime.isLoading,
+    hasEarlier: runtime.hasEarlier ?? false,
+    isLoadingEarlier: runtime.isLoadingEarlier ?? false,
+    isRunning: getThreadRuntimeCoreIsRunning(runtime),
+    canResume: runtime.canResume ?? false,
+    messages: runtime.messages,
+    state: runtime.state,
+    suggestions: runtime.suggestions,
+    extras: runtime.extras,
+    speech: runtime.speech,
+    voice: runtime.voice,
+  });
+};
+
+export type ThreadRuntime = {
+  /**
+   * The selector for the thread runtime.
+   */
+  readonly path: ThreadRuntimePath;
+
+  /**
+   * The thread composer runtime.
+   */
+  readonly composer: ThreadComposerRuntime;
+
+  /**
+   * Gets a snapshot of the thread state.
+   */
+  getState(): ThreadRuntimeState;
+
+  /**
+   * Append a new message to the thread.
+   *
+   * @example ```ts
+   * // append a new user message with the text "Hello, world!"
+   * threadRuntime.append("Hello, world!");
+   * ```
+   *
+   * @example ```ts
+   * // append a new assistant message with the text "Hello, world!"
+   * threadRuntime.append({
+   *   role: "assistant",
+   *   content: [{ type: "text", text: "Hello, world!" }],
+   * });
+   * ```
+   */
+  append(message: CreateAppendMessage): void;
+
+  deleteMessage(messageId: string): void | Promise<void>;
+
+  /**
+   * Start a new run with the given configuration.
+   * @param config The configuration for starting the run
+   */
+  startRun(config: CreateStartRunConfig): void;
+
+  /**
+   * Resume a run with the given configuration.
+   * @param config The configuration for resuming the run
+   **/
+  resumeRun(config: CreateResumeRunConfig): void;
+
+  /**
+   * Export the thread state in the external store format.
+   * For AI SDK runtimes, this returns the AI SDK message format.
+   * For other runtimes, this may return different formats or throw an error.
+   * @returns The thread state in the external format (typed as any)
+   */
+  exportExternalState(): any;
+
+  /**
+   * Import thread state from the external store format.
+   * For AI SDK runtimes, this accepts AI SDK messages.
+   * For other runtimes, this may accept different formats or throw an error.
+   * @param state The thread state in the external format (typed as any)
+   */
+  importExternalState(state: any): void;
+
+  subscribe(callback: () => void): Unsubscribe;
+  cancelRun(): void;
+  /**
+   * Loads the page before the first loaded message; resolves at once when
+   * `hasEarlier` is false. Concurrent calls share one load.
+   */
+  loadEarlier(): Promise<void>;
+  /**
+   * Notifies the runtime that the adapter discarded its backing session.
+   * Clears session-scoped tool-invocation state without run-cancel side
+   * effects such as composer draft restoration. Internal API for
+   * external-store adapter authors.
+   *
+   * @deprecated Experimental since 2026-08-14. Not scheduled for removal; the API may change in any release.
+   */
+  unstable_notifySessionReset(): void;
+  getModelContext(): ModelContext;
+
+  export(): ExportedMessageRepository;
+  import(repository: ExportedMessageRepository): void;
+
+  /**
+   * Reset the thread with optional initial messages.
+   *
+   * @param initialMessages - Optional array of initial messages to populate the thread
+   */
+  reset(initialMessages?: readonly ThreadMessageLike[]): void;
+
+  getMessageByIndex(idx: number): MessageRuntime;
+  getMessageById(messageId: string): MessageRuntime;
+
+  /**
+   * @deprecated Experimental since 2024-09-01. Not scheduled for removal; the API may change in any release.
+   */
+  stopSpeaking(): void;
+
+  connectVoice(): void;
+  disconnectVoice(): void;
+  getVoiceVolume(): number;
+  subscribeVoiceVolume(callback: () => void): Unsubscribe;
+  muteVoice(): void;
+  unmuteVoice(): void;
+
+  /** @deprecated Experimental since 2024-10-12. Not scheduled for removal; the API may change in any release. */
+  unstable_on<E extends ThreadRuntimeEventType>(
+    event: E,
+    callback: ThreadRuntimeEventCallback<E>,
+  ): Unsubscribe;
+};
+
+export class ThreadRuntimeImpl implements ThreadRuntime {
+  public get path() {
+    return this._threadBinding.path;
+  }
+
+  public get __internal_threadBinding() {
+    return this._threadBinding;
+  }
+
+  private readonly _threadBinding: ThreadRuntimeCoreBinding & {
+    getStateState(): ThreadRuntimeState;
+  };
+  private readonly _stateBinding: ShallowMemoizeSubject<
+    ThreadRuntimeState,
+    ThreadRuntimePath
+  >;
+
+  constructor(
+    threadBinding: ThreadRuntimeCoreBinding,
+    threadListItemBinding: ThreadListItemRuntimeBinding,
+  ) {
+    const stateBinding = new ShallowMemoizeSubject({
+      path: threadBinding.path,
+      getState: () =>
+        getThreadState(
+          threadBinding.getState(),
+          threadListItemBinding.getState(),
+        ),
+      subscribe: (callback) => {
+        const sub1 = threadBinding.subscribe(callback);
+        const sub2 = threadListItemBinding.subscribe(callback);
+        return () => runCleanups([sub1, sub2]);
+      },
+    });
+
+    this._stateBinding = stateBinding;
+    this._threadBinding = {
+      path: threadBinding.path,
+      getState: () => threadBinding.getState(),
+      getStateState: () => stateBinding.getState(),
+      outerSubscribe: (callback) => threadBinding.outerSubscribe(callback),
+      subscribe: (callback) => threadBinding.subscribe(callback),
+    };
+
+    this.composer = new ThreadComposerRuntimeImpl(
+      new NestedSubscriptionSubject({
+        path: {
+          ...this.path,
+          ref: `${this.path.ref}.composer`,
+          composerSource: "thread",
+        },
+        getState: () => this._threadBinding.getState().composer,
+        subscribe: (callback) => this._threadBinding.subscribe(callback),
+      }),
+    );
+
+    this.__internal_bindMethods();
+  }
+
+  protected __internal_bindMethods() {
+    this.append = this.append.bind(this);
+    this.deleteMessage = this.deleteMessage.bind(this);
+    this.resumeRun = this.resumeRun.bind(this);
+    this.loadEarlier = this.loadEarlier.bind(this);
+    this.importExternalState = this.importExternalState.bind(this);
+    this.exportExternalState = this.exportExternalState.bind(this);
+    this.startRun = this.startRun.bind(this);
+    this.cancelRun = this.cancelRun.bind(this);
+    this.unstable_notifySessionReset =
+      this.unstable_notifySessionReset.bind(this);
+    this.stopSpeaking = this.stopSpeaking.bind(this);
+    this.connectVoice = this.connectVoice.bind(this);
+    this.disconnectVoice = this.disconnectVoice.bind(this);
+    this.muteVoice = this.muteVoice.bind(this);
+    this.unmuteVoice = this.unmuteVoice.bind(this);
+    this.getVoiceVolume = this.getVoiceVolume.bind(this);
+    this.subscribeVoiceVolume = this.subscribeVoiceVolume.bind(this);
+    this.export = this.export.bind(this);
+    this.import = this.import.bind(this);
+    this.reset = this.reset.bind(this);
+    this.getMessageByIndex = this.getMessageByIndex.bind(this);
+    this.getMessageById = this.getMessageById.bind(this);
+    this.subscribe = this.subscribe.bind(this);
+    this.unstable_on = this.unstable_on.bind(this);
+    this.getModelContext = this.getModelContext.bind(this);
+    this.getState = this.getState.bind(this);
+  }
+
+  public readonly composer;
+
+  public getState() {
+    return this._threadBinding.getStateState();
+  }
+
+  public append(message: CreateAppendMessage) {
+    reportRunFailure(
+      "Message append",
+      this._threadBinding
+        .getState()
+        .append(
+          toAppendMessage(this._threadBinding.getState().messages, message),
+        ),
+    );
+  }
+
+  public deleteMessage(messageId: string) {
+    return this._threadBinding.getState().deleteMessage(messageId);
+  }
+
+  public subscribe(callback: () => void) {
+    return this._stateBinding.subscribe(callback);
+  }
+
+  public getModelContext() {
+    return this._threadBinding.getState().getModelContext();
+  }
+
+  public startRun(config: CreateStartRunConfig) {
+    return this._threadBinding.getState().startRun(toStartRunConfig(config));
+  }
+
+  public resumeRun(config: CreateResumeRunConfig) {
+    return this._threadBinding.getState().resumeRun(toResumeRunConfig(config));
+  }
+
+  public exportExternalState() {
+    return this._threadBinding.getState().exportExternalState();
+  }
+
+  public importExternalState(state: any) {
+    this._threadBinding.getState().importExternalState(state);
+  }
+
+  public cancelRun() {
+    this._threadBinding.getState().cancelRun();
+  }
+
+  public loadEarlier() {
+    return this._threadBinding.getState().loadEarlier?.() ?? Promise.resolve();
+  }
+
+  /** @deprecated Experimental since 2026-08-14. Not scheduled for removal; the API may change in any release. */
+  public unstable_notifySessionReset() {
+    this._threadBinding.getState().unstable_notifySessionReset();
+  }
+
+  public stopSpeaking() {
+    return this._threadBinding.getState().stopSpeaking();
+  }
+
+  public connectVoice() {
+    this._threadBinding.getState().connectVoice();
+  }
+
+  public disconnectVoice() {
+    this._threadBinding.getState().disconnectVoice();
+  }
+
+  public getVoiceVolume() {
+    return this._threadBinding.getState().getVoiceVolume();
+  }
+
+  public subscribeVoiceVolume(callback: () => void) {
+    return this._threadBinding.getState().subscribeVoiceVolume(callback);
+  }
+
+  public muteVoice() {
+    this._threadBinding.getState().muteVoice();
+  }
+
+  public unmuteVoice() {
+    this._threadBinding.getState().unmuteVoice();
+  }
+
+  public export() {
+    return this._threadBinding.getState().export();
+  }
+
+  public import(data: ExportedMessageRepository) {
+    this._threadBinding.getState().import(data);
+  }
+
+  public reset(initialMessages?: readonly ThreadMessageLike[]) {
+    this._threadBinding.getState().reset(initialMessages);
+  }
+
+  public getMessageByIndex(idx: number) {
+    if (idx < 0) throw new Error("Message index must be >= 0");
+
+    return this._getMessageRuntime(
+      {
+        ...this.path,
+        ref: `${this.path.ref}.messages[${idx}]`,
+        messageSelector: { type: "index", index: idx },
+      },
+      () => {
+        const messages = this._threadBinding.getState().messages;
+        const message = messages[idx];
+        if (!message) return undefined;
+        return {
+          message,
+          parentId: messages[idx - 1]?.id ?? null,
+          index: idx,
+        };
+      },
+    );
+  }
+
+  public getMessageById(messageId: string) {
+    return this._getMessageRuntime(
+      {
+        ...this.path,
+        ref: `${this.path.ref}.messages[messageId=${JSON.stringify(messageId)}]`,
+        messageSelector: { type: "messageId", messageId: messageId },
+      },
+      () => this._threadBinding.getState().getMessageById(messageId),
+    );
+  }
+
+  private _getMessageRuntime(
+    path: MessageRuntimePath,
+    callback: () =>
+      | { parentId: string | null; message: ThreadMessage; index: number }
+      | undefined,
+  ) {
+    return new MessageRuntimeImpl(
+      new ShallowMemoizeSubject({
+        path,
+        getState: () => {
+          const { message, parentId, index } = callback() ?? {};
+
+          const { messages, speech: speechState } =
+            this._threadBinding.getState();
+
+          if (!message || parentId === undefined || index === undefined)
+            return SKIP_UPDATE;
+
+          const thread = this._threadBinding.getState();
+
+          const branches = thread.getBranches(message.id);
+
+          return {
+            ...message,
+            ...{ [symbolInnerMessage]: (message as any)[symbolInnerMessage] },
+
+            index,
+            isLast: messages.at(-1)?.id === message.id,
+            parentId,
+
+            branchNumber: branches.indexOf(message.id) + 1,
+            branchCount: branches.length,
+
+            speech:
+              speechState?.messageId === message.id ? speechState : undefined,
+          } satisfies MessageRuntimeState;
+        },
+        subscribe: (callback) => this._threadBinding.subscribe(callback),
+      }),
+      this._threadBinding,
+    );
+  }
+
+  private _eventSubscriptionSubjects = new Map<
+    string,
+    EventSubscriptionSubject<ThreadRuntimeEventType>
+  >();
+
+  /** @deprecated Experimental since 2024-10-12. Not scheduled for removal; the API may change in any release. */
+  public unstable_on<E extends ThreadRuntimeEventType>(
+    event: E,
+    callback: ThreadRuntimeEventCallback<E>,
+  ): Unsubscribe {
+    let subject = this._eventSubscriptionSubjects.get(event);
+    if (!subject) {
+      subject = new EventSubscriptionSubject<ThreadRuntimeEventType>({
+        event,
+        binding: this._threadBinding,
+        // The main thread binding starts on a placeholder core whose model
+        // context is empty and swaps to the real one once it attaches, so a
+        // subscriber that read the context before that would keep the
+        // placeholder's forever.
+        notifyOnRebind: event === "modelContextUpdate",
+      });
+      this._eventSubscriptionSubjects.set(event, subject);
+    }
+    return subject.subscribe(callback as (payload?: unknown) => void);
+  }
+}

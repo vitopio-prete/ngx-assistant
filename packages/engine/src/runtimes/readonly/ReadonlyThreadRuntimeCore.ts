@@ -1,0 +1,116 @@
+import type { ThreadMessage } from "../../types/message";
+import type { CreateAttachment } from "../../types/attachment";
+import type { QuoteInfo } from "../../types/quote";
+import type { SendOptions } from "../../runtime/interfaces/composer-runtime-core";
+import {
+  InertThreadRuntimeCore,
+  createInertComposer,
+} from "../inert/InertThreadRuntimeCore";
+import type { Unstable_RecordToolInteractionOptions } from "../../runtime/interfaces/thread-runtime-core";
+
+const READONLY_THREAD_ERROR = new Error(
+  "This is a readonly thread. You cannot perform mutations on readonly threads.",
+);
+
+export class ReadonlyThreadRuntimeCore extends InertThreadRuntimeCore {
+  protected get error() {
+    return READONLY_THREAD_ERROR;
+  }
+
+  private _messages: readonly ThreadMessage[] = [];
+
+  get messages() {
+    return this._messages;
+  }
+
+  setMessages(messages: readonly ThreadMessage[]) {
+    if (this._messages === messages) return;
+    this._messages = messages;
+    this._notifySubscribers();
+  }
+
+  getMessageById(messageId: string) {
+    const idx = this._messages.findIndex((m) => m.id === messageId);
+    if (idx === -1) return undefined;
+    return {
+      parentId: this._messages[idx - 1]?.id ?? null,
+      message: this._messages[idx]!,
+      index: idx,
+    };
+  }
+
+  getBranches(messageId: string) {
+    const idx = this._messages.findIndex((m) => m.id === messageId);
+    if (idx === -1) return [];
+    return [messageId];
+  }
+
+  export() {
+    return {
+      messages: this._messages.map((message, idx) => ({
+        message,
+        parentId: this._messages[idx - 1]?.id ?? null,
+      })),
+    };
+  }
+
+  composer = {
+    ...createInertComposer(READONLY_THREAD_ERROR, false),
+    async addAttachment(_fileOrAttachment: File | CreateAttachment) {},
+    setText(_value: string) {},
+    send(_options?: SendOptions) {},
+    setQuote(_quote: QuoteInfo | undefined) {},
+  };
+
+  isLoading = false;
+  override isDisabled = true;
+  override isSendDisabled = true;
+
+  override switchToBranch(): void {}
+
+  override append(): void {}
+
+  override deleteMessage(): void {}
+
+  override startRun(): void {}
+
+  override resumeRun(): void {}
+
+  override cancelRun(): void {}
+
+  /** @deprecated Experimental since 2026-08-14. Not scheduled for removal; the API may change in any release. */
+  override unstable_notifySessionReset(): void {}
+
+  override addToolResult(): void {}
+
+  override resumeToolCall(): void {}
+
+  override async respondToToolApproval(): Promise<void> {}
+
+  /** @deprecated Experimental since 2026-09-23. Not scheduled for removal; the API may change in any release. */
+  override async unstable_recordToolInteraction(
+    _options: Unstable_RecordToolInteractionOptions,
+  ): Promise<void> {}
+
+  override speak(): void {}
+
+  override stopSpeaking(): void {}
+
+  override connectVoice(): void {}
+
+  override disconnectVoice(): void {}
+
+  override muteVoice(): void {}
+
+  override unmuteVoice(): void {}
+
+  override submitFeedback(): void {}
+
+  override importExternalState(): void {}
+
+  override beginEdit(): void {}
+
+  override import(): void {}
+
+  override reset(): void {}
+}

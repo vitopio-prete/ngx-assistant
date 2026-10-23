@@ -1,0 +1,40 @@
+name: Setup
+description: Install pnpm, Node.js and the workspace dependencies.
+
+inputs:
+  node-version:
+    description: Node.js version to install.
+    default: 24.x
+
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v6
+      with:
+        run_install: false
+
+    - name: Use Node.js ${{ inputs.node-version }}
+      uses: actions/setup-node@v7
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    # Cache the pnpm store with a prefix fallback, so a lockfile change only
+    # downloads the packages that actually changed.
+    - name: Locate pnpm store
+      id: pnpm-store
+      shell: bash
+      run: |
+        store_path="$(pnpm store path --silent)"
+        echo "path=$store_path" >> "$GITHUB_OUTPUT"
+
+    - name: Cache pnpm store
+      uses: actions/cache@v6
+      with:
+        path: ${{ steps.pnpm-store.outputs.path }}
+        key: pnpm-store-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: |
+          pnpm-store-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Install packages
+      shell: bash
+      run: pnpm install --frozen-lockfile

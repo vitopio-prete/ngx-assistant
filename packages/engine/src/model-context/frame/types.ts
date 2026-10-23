@@ -1,0 +1,52 @@
+export type SerializedTool = {
+  description?: string;
+  parameters: any; // JSON Schema
+  disabled?: boolean;
+  type?: string;
+};
+
+export type SerializedModelContext = {
+  system?: string;
+  tools?: Record<string, SerializedTool>;
+};
+
+export type FrameMessageType =
+  | "model-context-request"
+  | "model-context-update"
+  | "tool-call"
+  | "tool-cancel"
+  | "tool-result"
+  | "provider-disposed";
+
+export type FrameMessage = (
+  | {
+      type: "model-context-request";
+      requestId?: string;
+    }
+  | {
+      type: "model-context-update";
+      context: SerializedModelContext;
+      requestId?: string;
+    }
+  | {
+      type: "tool-call";
+      id: string;
+      toolName: string;
+      args: unknown;
+    }
+  | {
+      type: "tool-cancel";
+      id: string;
+    }
+  | {
+      type: "tool-result";
+      id: string;
+      result?: unknown;
+      error?: string;
+    }
+  | {
+      type: "provider-disposed";
+    }
+) & { documentId?: string };
+
+export const FRAME_MESSAGE_CHANNEL = "ngx-assistant-frame";

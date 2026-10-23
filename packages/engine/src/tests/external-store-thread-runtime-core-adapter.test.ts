@@ -1,0 +1,3766 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  ExternalStoreThreadRuntimeCore,
+  hasUpcomingMessage,
+} from "../runtimes/external-store/external-store-thread-runtime-core";
+import { ExternalStoreRuntimeCore } from "../runtimes/external-store/external-store-runtime-core";
+import type { ExternalStoreAdapter } from "../runtimes/external-store/external-store-adapter";
+import type { RealtimeVoiceAdapter } from "../adapters/voice";
+import type { ModelContextProvider } from "../model-context/types";
+import type {
+  AppendMessage,
+  ThreadAssistantMessage,
+  ThreadMessage,
+} from "../types/message";
+import type { ThreadMessageLike } from "../runtime/utils/thread-message-like";
+import { createMessageQueue } from "../runtime/queue/message-queue";
+import { getThreadMessageText } from "../utils/text";
+import {
+  invalidateThreadRuntime,
+  supersedeThreadRuntime,
+} from "../runtime/utils/thread-runtime-lifecycle";
+import {
+  ExportedMessageRepository,
+  MessageRepository,
+} from "../runtime/utils/message-repository";
+
+const createContextProvider = (): ModelContextProvider => ({
+  getModelContext: () => ({}),
+});
+
+const createUserMessage = (id: string, text = "Hello"): ThreadMessage =>
+  ({
+    id,
+    role: "user" as const,
+    createdAt: new Date(),
+    content: [{ type: "text" as const, text }],
+    attachments: [],
+    metadata: {
+      custom: {},
+    },
+  }) as ThreadMessage;
+
+const createAssistantMessage = (
+  id: string,
+  text = "Hi there",
+): ThreadAssistantMessage => ({
+  id,
+  role: "assistant" as const,
+  createdAt: new Date(),
+  content: [{ type: "text" as const, text }],
+  status: { type: "complete" as const, reason: "stop" as const },
+  metadata: {
+    unstable_state: null,
+    unstable_annotations: [],
+    unstable_data: [],
+    steps: [],
+    custom: {},
+  },
+});
+
+const createBaseAdapter = (
+  overrides: Partial<ExternalStoreAdapter<ThreadMessage>> = {},
+): ExternalStoreAdapter<ThreadMessage> => ({
+  messages: [],
+  onNew: vi.fn(async () => {}),
+  ...overrides,
+});
+
+const captureUnhandledRejections = async (
+  run: () => Promise<void>,
+): Promise<unknown[]> => {
+  const rejections: unknown[] = [];
+  const onUnhandledRejection = (reason: unknown) => {
+    rejections.push(reason);
+  };
+  process.on("unhandledRejection", onUnhandledRejection);
+  try {
+    await run();
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    process.removeListener("unhandledRejection", onUnhandledRejection);
+  }
+  return rejections;
+};
+
+describe("ExternalStoreThreadRuntimeCore adapter contract", () => {
+  let contextProvider: ModelContextProvider;
+
+  beforeEach(() => {
+    contextProvider = createContextProvider();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("hasUpcomingMessage is true only while running without an assistant tail", () => {
+    expect(hasUpcomingMessage(true, [createUserMessage("u1")])).toBe(true);
+    expect(hasUpcomingMessage(true, [createAssistantMessage("a1")])).toBe(
+      false,
+    );
+    expect(hasUpcomingMessage(false, [createUserMessage("u1")])).toBe(false);
+    expect(hasUpcomingMessage(true, [])).toBe(true);
+  });
+
+  it("derives capabilities from adapter handler presence", () => {
+    const bare = new ExternalStoreThreadRuntimeCore(
+      contextProvider,
+      createBaseAdapter(),
+    );
+    expect(bare.capabilities.edit).toBe(false);
+    expect(bare.capabilities.reload).toBe(false);
+    expect(bare.capabilities.cancel).toBe(false);
+    expect(bare.capabilities.switchToBranch).toBe(false);
+    expect(bare.capabilities.unstable_copy).toBe(true);
+    expect(bare.capabilities.answerToolCall).toBe(false);
+
+    const full = new ExternalStoreThreadRuntimeCore(
+      contextProvider,
+      createBaseAdapter({
+        onEdit: vi.fn(async () => {}),
+        onReload: vi.fn(async () => {}),
+        onCancel: vi.fn(async () => {}),
+        setMessages: vi.fn(),
+        unstable_capabilities: { copy: false },
+      }),
+    );
+    expect(full.capabilities.edit).toBe(true);
+    expect(full.capabilities.reload).toBe(true);
+    expect(full.capabilities.cancel).toBe(true);
+    expect(full.capabilities.switchToBranch).toBe(true);
+    expect(full.capabilities.unstable_copy).toBe(false);
+  });
+
+  it("reports answerToolCall when any tool answer handler is set", () => {
+    for (const handler of [
+      { onAddToolResult: vi.fn() },
+      { onResumeToolCall: vi.fn() },
+      { onRespondToToolApproval: vi.fn(async () => {}) },
+    ]) {
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter(handler),
+      );
+      expect(core.capabilities.answerToolCall).toBe(true);
+    }
+  });
+
+  describe("append", () => {
+    it("calls onNew when parentId matches last message id", async () => {
+      const onNew = vi.fn(async () => {});
+      const messages = [createUserMessage("u1"), createAssistantMessage("a1")];
+      const adapter = createBaseAdapter({ messages, onNew });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      const appendMessage: AppendMessage = {
+        role: "user",
+        content: [{ type: "text", text: "Follow up" }],
+        attachments: [],
+        createdAt: new Date(),
+        parentId: "a1",
+        sourceId: null,
+        runConfig: undefined,
+        metadata: { custom: {} },
+      } as AppendMessage;
+
+      await core.append(appendMessage);
+      expect(onNew).toHaveBeenCalledWith(appendMessage);
+    });
+
+    it("calls onEdit when parentId does not match last message id", async () => {
+      const onEdit = vi.fn(async () => {});
+      const onNew = vi.fn(async () => {});
+      const messages = [createUserMessage("u1"), createAssistantMessage("a1")];
+      const adapter = createBaseAdapter({ messages, onNew, onEdit });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      const appendMessage: AppendMessage = {
+        role: "user",
+        content: [{ type: "text", text: "Edit" }],
+        attachments: [],
+        createdAt: new Date(),
+        parentId: "u1",
+        sourceId: null,
+        runConfig: undefined,
+        metadata: { custom: {} },
+      } as AppendMessage;
+
+      await core.append(appendMessage);
+      expect(onEdit).toHaveBeenCalledWith(appendMessage);
+      expect(onNew).not.toHaveBeenCalled();
+    });
+
+    it.each(["u1", null])(
+      "rejects parent %s without onEdit",
+      async (parentId) => {
+        const messages = [
+          createUserMessage("u1"),
+          createAssistantMessage("a1"),
+        ];
+        const adapter = createBaseAdapter({ messages });
+        const core = new ExternalStoreThreadRuntimeCore(
+          contextProvider,
+          adapter,
+        );
+
+        const appendMessage: AppendMessage = {
+          role: "user",
+          content: [{ type: "text", text: "Edit" }],
+          attachments: [],
+          createdAt: new Date(),
+          parentId,
+          sourceId: null,
+          runConfig: undefined,
+          metadata: { custom: {} },
+        } as AppendMessage;
+
+        await expect(core.append(appendMessage)).rejects.toThrow(
+          "Runtime does not support editing messages.",
+        );
+      },
+    );
+  });
+
+  describe("startRun", () => {
+    it("delegates to onReload", async () => {
+      const onReload = vi.fn(async () => {});
+      const adapter = createBaseAdapter({ onReload });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      await core.startRun({ parentId: "msg-1", sourceId: null, runConfig: {} });
+      expect(onReload).toHaveBeenCalledWith("msg-1", {
+        parentId: "msg-1",
+        sourceId: null,
+        runConfig: {},
+      });
+    });
+
+    it("does not reload when Stop lands while client tools abort", async () => {
+      let resolveAbort!: () => void;
+      const abortPromise = new Promise<void>((resolve) => {
+        resolveAbort = resolve;
+      });
+      const onReload = vi.fn(async () => {});
+      const onCancel = vi.fn();
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({ onReload, onCancel }),
+      );
+      const abort = vi.fn(() => abortPromise);
+      (
+        core as unknown as { _toolInvocations: { abort: typeof abort } }
+      )._toolInvocations = { abort };
+
+      const reload = core.startRun({
+        parentId: "msg-1",
+        sourceId: null,
+        runConfig: {},
+      });
+      expect(abort).toHaveBeenCalledOnce();
+
+      core.cancelRun();
+      resolveAbort();
+      await reload;
+
+      expect(onReload).not.toHaveBeenCalled();
+    });
+
+    it("throws when adapter has no onReload", async () => {
+      const adapter = createBaseAdapter();
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      await expect(
+        core.startRun({ parentId: "msg-1", sourceId: null, runConfig: {} }),
+      ).rejects.toThrow("Runtime does not support reloading messages.");
+    });
+  });
+
+  describe("cancelRun", () => {
+    it("delegates to onCancel", () => {
+      const onCancel = vi.fn();
+      const messages = [createUserMessage("u1"), createAssistantMessage("a1")];
+      const adapter = createBaseAdapter({
+        messages,
+        onCancel,
+        setMessages: vi.fn(),
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      core.cancelRun();
+      expect(onCancel).toHaveBeenCalled();
+    });
+
+    it("throws when adapter has no onCancel", () => {
+      const adapter = createBaseAdapter();
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      expect(() => core.cancelRun()).toThrow(
+        "Runtime does not support cancelling runs.",
+      );
+    });
+
+    it("keeps a partially-streamed optimistic message on cancel", async () => {
+      const optimisticAssistant = {
+        ...createAssistantMessage("server-msg", "partial answer"),
+        status: { type: "running" as const },
+        metadata: {
+          unstable_state: null,
+          unstable_annotations: [],
+          unstable_data: [],
+          steps: [],
+          custom: {},
+          isOptimistic: true,
+        },
+      } as ThreadMessage;
+      const setMessages = vi.fn();
+      const adapter = createBaseAdapter({
+        messages: [createUserMessage("u1"), optimisticAssistant],
+        isRunning: true,
+        onCancel: vi.fn(),
+        setMessages,
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      core.cancelRun();
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(core.messages.map((m) => m.id)).toEqual(["u1", "server-msg"]);
+      expect(setMessages).not.toHaveBeenCalled();
+    });
+
+    it("does not revert a store update that lands before the resync flushes", async () => {
+      const optimisticAssistant = {
+        ...createAssistantMessage("server-msg", "partial answer"),
+        status: { type: "running" as const },
+        metadata: {
+          unstable_state: null,
+          unstable_annotations: [],
+          unstable_data: [],
+          steps: [],
+          custom: {},
+          isOptimistic: true,
+        },
+      } as ThreadMessage;
+      const setMessages = vi.fn();
+      const adapter = createBaseAdapter({
+        messages: [createUserMessage("u1"), optimisticAssistant],
+        isRunning: true,
+        onCancel: vi.fn(),
+        setMessages,
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      core.cancelRun();
+
+      // The store settles the cancelled turn and re-supplies it in the same
+      // tick as the cancel.
+      core.__internal_setAdapter(
+        createBaseAdapter({
+          messages: [
+            createUserMessage("u1"),
+            createAssistantMessage("server-msg", "partial answer (stopped)"),
+          ],
+          isRunning: false,
+          onCancel: vi.fn(),
+          setMessages,
+        }),
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(setMessages).not.toHaveBeenCalled();
+      expect(core.messages.map(getThreadMessageText)).toEqual([
+        "Hello",
+        "partial answer (stopped)",
+      ]);
+    });
+
+    it("does not resync after the runtime is invalidated", async () => {
+      const setMessages = vi.fn();
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({
+          messages: [createAssistantMessage("a1", "partial answer")],
+          isRunning: true,
+          onCancel: vi.fn(),
+          setMessages,
+        }),
+      );
+
+      core.cancelRun();
+      invalidateThreadRuntime(core);
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(setMessages).not.toHaveBeenCalled();
+    });
+
+    it("does not resync cancelled messages over an explicit reset", async () => {
+      const setMessages = vi.fn();
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({
+          messages: [
+            createUserMessage("u1"),
+            createAssistantMessage("a1", "partial answer"),
+          ],
+          isRunning: true,
+          onCancel: vi.fn(),
+          setMessages,
+        }),
+      );
+      const replacement = createUserMessage("replacement", "fresh prompt");
+
+      core.cancelRun();
+      core.reset([replacement]);
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(setMessages).toHaveBeenCalledOnce();
+      expect(setMessages).toHaveBeenLastCalledWith([replacement]);
+    });
+
+    it("re-applies the user leaf rollback when the store updates before the flush", async () => {
+      const messages = [
+        createUserMessage("u0"),
+        createAssistantMessage("a0"),
+        createUserMessage("u1", "cancel me"),
+      ];
+      const setMessages = vi.fn();
+      const adapter = createBaseAdapter({
+        messages,
+        isRunning: true,
+        onCancel: vi.fn(),
+        setMessages,
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      core.cancelRun();
+
+      // The host flips isRunning after onCancel; the store still holds the
+      // rolled-back message because only the deferred resync removes it.
+      core.__internal_setAdapter(
+        createBaseAdapter({
+          messages,
+          isRunning: false,
+          onCancel: vi.fn(),
+          setMessages,
+        }),
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(core.composer.text).toBe("cancel me");
+      expect(setMessages).toHaveBeenCalledOnce();
+      const lastCall = setMessages.mock.lastCall?.[0] as ThreadMessage[];
+      expect(lastCall.map((m) => m.id)).toEqual(["u0", "a0"]);
+      expect(core.export().messages.map((m) => m.message.id)).toEqual([
+        "u0",
+        "a0",
+      ]);
+    });
+
+    it("keeps a rolled-back user leaf the store answered in the gap and takes the draft back", async () => {
+      const setMessages = vi.fn();
+      const adapter = createBaseAdapter({
+        messages: [createUserMessage("u1", "cancel me")],
+        isRunning: true,
+        onCancel: vi.fn(),
+        setMessages,
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      core.cancelRun();
+      expect(core.composer.text).toBe("cancel me");
+
+      core.__internal_setAdapter(
+        createBaseAdapter({
+          messages: [
+            createUserMessage("u1", "cancel me"),
+            createAssistantMessage("a1", "answered anyway"),
+          ],
+          isRunning: false,
+          onCancel: vi.fn(),
+          setMessages,
+        }),
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(core.composer.text).toBe("");
+      expect(core.messages.map((m) => m.id)).toEqual(["u1", "a1"]);
+      expect(setMessages).not.toHaveBeenCalled();
+    });
+
+    it("leaves an edited draft alone when the store answered in the gap", async () => {
+      const setMessages = vi.fn();
+      const adapter = createBaseAdapter({
+        messages: [createUserMessage("u1", "cancel me")],
+        isRunning: true,
+        onCancel: vi.fn(),
+        setMessages,
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      core.cancelRun();
+      core.composer.setText("edited");
+
+      core.__internal_setAdapter(
+        createBaseAdapter({
+          messages: [
+            createUserMessage("u1", "cancel me"),
+            createAssistantMessage("a1", "answered anyway"),
+          ],
+          isRunning: false,
+          onCancel: vi.fn(),
+          setMessages,
+        }),
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(core.composer.text).toBe("edited");
+      expect(core.messages.map((m) => m.id)).toEqual(["u1", "a1"]);
+      expect(setMessages).not.toHaveBeenCalled();
+    });
+
+    it("drops a placeholder regenerated between cancel and flush", async () => {
+      const setMessages = vi.fn();
+      const adapter = createBaseAdapter({
+        messages: [createUserMessage("u1", "cancel me")],
+        isRunning: true,
+        onCancel: vi.fn(),
+        setMessages,
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      core.cancelRun();
+
+      core.__internal_setAdapter(
+        createBaseAdapter({
+          messages: [createUserMessage("u1", "cancel me")],
+          isRunning: true,
+          onCancel: vi.fn(),
+          setMessages,
+        }),
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(core.composer.text).toBe("cancel me");
+      const lastCall = setMessages.mock.lastCall?.[0] as ThreadMessage[];
+      expect(lastCall).toEqual([]);
+    });
+
+    it.each([
+      { label: "without setMessages", withSetMessages: false, ids: ["u1"] },
+      { label: "with setMessages", withSetMessages: true, ids: [] },
+    ])(
+      "publishes only resolvable messages through the rollback $label",
+      async ({ withSetMessages, ids }) => {
+        const setMessages = vi.fn();
+        const adapter = () =>
+          createBaseAdapter({
+            messages: [createUserMessage("u1", "cancel me")],
+            isRunning: true,
+            onCancel: vi.fn(),
+            ...(withSetMessages && { setMessages }),
+          });
+        const core = new ExternalStoreThreadRuntimeCore(
+          contextProvider,
+          adapter(),
+        );
+        const unresolved = () =>
+          core.messages
+            .filter((m) => !core.getMessageById(m.id))
+            .map((m) => m.id);
+        expect(core.messages).toHaveLength(2);
+
+        core.cancelRun();
+        expect(unresolved()).toEqual([]);
+
+        core.__internal_setAdapter(adapter());
+        expect(unresolved()).toEqual([]);
+
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(unresolved()).toEqual([]);
+        expect(core.messages.map((m) => m.id)).toEqual(ids);
+      },
+    );
+
+    it("does not write back over a store update the runtime has not received", async () => {
+      let hostMessages: readonly ThreadMessage[] = [
+        createUserMessage("u1"),
+        createAssistantMessage("a1"),
+      ];
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({
+          messages: hostMessages,
+          onCancel: vi.fn(),
+          onNew: vi.fn(async () => {
+            hostMessages = [...hostMessages, createUserMessage("u2")];
+          }),
+          setMessages: (messages) => {
+            hostMessages = messages;
+          },
+        }),
+      );
+
+      core.cancelRun();
+      await core.append({
+        role: "user",
+        content: [{ type: "text", text: "next" }],
+        attachments: [],
+        createdAt: new Date(),
+        parentId: "a1",
+        sourceId: null,
+        runConfig: {},
+        metadata: { custom: {} },
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(hostMessages.map((m) => m.id)).toEqual(["u1", "a1", "u2"]);
+    });
+
+    it("does not write back over a send that follows a delete the runtime has not received", async () => {
+      let hostMessages: readonly ThreadMessage[] = [
+        createUserMessage("u1"),
+        createAssistantMessage("a1"),
+        createUserMessage("u2"),
+        createAssistantMessage("a2"),
+      ];
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({
+          messages: hostMessages,
+          onCancel: vi.fn(),
+          onNew: vi.fn(async () => {
+            hostMessages = [...hostMessages, createUserMessage("u3")];
+          }),
+          setMessages: (messages) => {
+            hostMessages = messages;
+          },
+        }),
+      );
+
+      await core.deleteMessage("u1");
+      core.cancelRun();
+      await core.append({
+        role: "user",
+        content: [{ type: "text", text: "next" }],
+        attachments: [],
+        createdAt: new Date(),
+        parentId: "a2",
+        sourceId: null,
+        runConfig: {},
+        metadata: { custom: {} },
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(hostMessages.map((m) => m.id)).toEqual(["a1", "u2", "a2", "u3"]);
+    });
+
+    it("keeps the placeholder of a run that started before the resync flushes", async () => {
+      const messages = [createUserMessage("u1"), createAssistantMessage("a1")];
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({ messages, onCancel: vi.fn() }),
+      );
+
+      core.cancelRun();
+      core.__internal_setAdapter(
+        createBaseAdapter({
+          messages: [...messages, createUserMessage("u2")],
+          isRunning: true,
+          onCancel: vi.fn(),
+        }),
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(core.messages.map((m) => m.role)).toEqual([
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+      ]);
+      expect(core.messages.at(-1)?.metadata.isOptimistic).toBe(true);
+    });
+
+    it("keeps the placeholder of a reload under the stopped tail that started before the resync flushes", async () => {
+      const messages = [createUserMessage("u1")];
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({
+          messages,
+          isRunning: true,
+          onCancel: vi.fn(),
+          onReload: vi.fn(async () => {}),
+        }),
+      );
+
+      core.cancelRun();
+      await core.startRun({ parentId: "u1", sourceId: null, runConfig: {} });
+      core.__internal_setAdapter(
+        createBaseAdapter({
+          messages: [...messages],
+          isRunning: true,
+          onCancel: vi.fn(),
+          onReload: vi.fn(async () => {}),
+        }),
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(core.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+      expect(core.messages.at(-1)?.metadata.isOptimistic).toBe(true);
+    });
+
+    it.each(["messages", "messageRepository"] as const)(
+      "keeps a stopped user leaf from %s in the host when its run restarts before the resync flushes",
+      async (source) => {
+        let hostMessages: readonly ThreadMessage[] = [
+          createUserMessage("u1", "cancel me"),
+        ];
+        const setMessages = vi.fn((messages: readonly ThreadMessage[]) => {
+          hostMessages = messages;
+        });
+        const core = new ExternalStoreThreadRuntimeCore(
+          contextProvider,
+          createBaseAdapter({
+            ...(source === "messages"
+              ? { messages: hostMessages }
+              : {
+                  messageRepository:
+                    ExportedMessageRepository.fromArray(hostMessages),
+                }),
+            isRunning: true,
+            onCancel: vi.fn(),
+            onReload: vi.fn(async () => {}),
+            setMessages,
+          }),
+        );
+
+        core.cancelRun();
+        expect(core.composer.text).toBe("cancel me");
+        await core.startRun({ parentId: "u1", sourceId: null, runConfig: {} });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(hostMessages.map((m) => m.id)).toEqual(["u1"]);
+        expect(core.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+        expect(core.messages.at(-1)?.metadata.isOptimistic).toBe(true);
+        expect(core.composer.text).toBe("");
+        expect(setMessages).not.toHaveBeenCalled();
+      },
+    );
+
+    it("keeps a stopped user leaf in the host when its run resumes before the resync flushes", async () => {
+      let hostMessages: readonly ThreadMessage[] = [
+        createUserMessage("u1", "cancel me"),
+      ];
+      const setMessages = vi.fn((messages: readonly ThreadMessage[]) => {
+        hostMessages = messages;
+      });
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({
+          messages: hostMessages,
+          isRunning: true,
+          onCancel: vi.fn(),
+          onResume: vi.fn(async () => {}),
+          setMessages,
+        }),
+      );
+
+      core.cancelRun();
+      expect(core.composer.text).toBe("cancel me");
+      await core.resumeRun({ parentId: "u1", sourceId: null, runConfig: {} });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(hostMessages.map((m) => m.id)).toEqual(["u1"]);
+      expect(core.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+      expect(core.messages.at(-1)?.metadata.isOptimistic).toBe(true);
+      expect(core.composer.text).toBe("");
+      expect(setMessages).not.toHaveBeenCalled();
+    });
+
+    it("does not write a stopped message back while the composer holds it", async () => {
+      let finishTool!: () => void;
+      const execute = vi.fn(
+        () =>
+          new Promise<string>((resolve) => {
+            finishTool = () => resolve("sunny");
+          }),
+      );
+      let hostMessages: readonly ThreadMessage[] = [];
+      let hostRunning = false;
+      const adapter = () =>
+        createBaseAdapter({
+          messages: hostMessages,
+          isRunning: hostRunning,
+          setMessages: (messages) => {
+            hostMessages = messages;
+          },
+          onCancel: vi.fn(async () => {
+            hostRunning = false;
+          }),
+          unstable_enableToolInvocations: true,
+          onAddToolResult: vi.fn(),
+        });
+      const core = new ExternalStoreThreadRuntimeCore(
+        {
+          getModelContext: () => ({
+            tools: {
+              weatherSearch: {
+                parameters: { type: "object", properties: {} },
+                execute,
+              },
+            },
+          }),
+        },
+        adapter(),
+      );
+      hostMessages = [
+        createUserMessage("u1"),
+        {
+          ...createAssistantMessage("a1"),
+          status: { type: "requires-action", reason: "tool-calls" },
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "tc1",
+              toolName: "weatherSearch",
+              args: {},
+              argsText: "{}",
+            },
+          ],
+        },
+      ];
+      core.__internal_setAdapter(adapter());
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+
+      const timers: (() => void)[] = [];
+      vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+        fn: () => void,
+      ) => {
+        timers.push(fn);
+        return 0;
+      }) as unknown as typeof setTimeout);
+      hostMessages = [...hostMessages, createUserMessage("u2", "second")];
+      hostRunning = true;
+      core.__internal_setAdapter(adapter());
+      core.cancelRun();
+      expect(core.composer.text).toBe("second");
+      core.__internal_setAdapter(adapter());
+      core.cancelRun();
+
+      timers.shift()!();
+      expect(hostMessages.map((m) => m.id)).toEqual(["u1", "a1"]);
+      finishTool();
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(core.isRunning).toBe(false);
+      timers.shift()!();
+
+      expect(core.composer.text).toBe("second");
+      expect(hostMessages.map((m) => m.id)).toEqual(["u1", "a1"]);
+    });
+
+    it("keeps the published messages array when cancel rolls nothing back", async () => {
+      const messages = [createUserMessage("u1"), createAssistantMessage("a1")];
+      const adapter = () =>
+        createBaseAdapter({
+          messages: [...messages],
+          isRunning: true,
+          onCancel: vi.fn(),
+        });
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        adapter(),
+      );
+      core.__internal_setAdapter(adapter());
+      const published = core.messages;
+
+      core.cancelRun();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(core.messages).toBe(published);
+    });
+
+    it("evicts an empty optimistic head on cancel", async () => {
+      const optimisticAssistant = {
+        ...createAssistantMessage("server-msg", ""),
+        content: [],
+        status: { type: "running" as const },
+        metadata: {
+          unstable_state: null,
+          unstable_annotations: [],
+          unstable_data: [],
+          steps: [],
+          custom: {},
+          isOptimistic: true,
+        },
+      } as ThreadMessage;
+      const setMessages = vi.fn();
+      const adapter = createBaseAdapter({
+        messages: [createUserMessage("u1"), optimisticAssistant],
+        isRunning: true,
+        onCancel: vi.fn(),
+        setMessages,
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      core.cancelRun();
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const lastCall = setMessages.mock.lastCall?.[0] as ThreadMessage[];
+      expect(lastCall.map((m) => m.id)).not.toContain("server-msg");
+    });
+
+    it("pauses a queue instead of dispatching the next message", async () => {
+      const dispatched: string[] = [];
+      const queue = createMessageQueue({
+        run: (message) => {
+          dispatched.push(getThreadMessageText(message));
+        },
+      });
+      const adapter = createBaseAdapter({
+        isRunning: true,
+        onCancel: vi.fn(),
+        queue: queue.adapter,
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+      const appendAtTail = (text: string) =>
+        core.append({
+          role: "user",
+          content: [{ type: "text", text }],
+          attachments: [],
+          createdAt: new Date(),
+          parentId: core.messages.at(-1)?.id ?? null,
+          sourceId: null,
+          runConfig: undefined,
+          metadata: { custom: {} },
+        } as AppendMessage);
+
+      await appendAtTail("first");
+      await appendAtTail("queued");
+
+      core.cancelRun();
+      // the aborted run settles; a queue host reports that the same way it
+      // reports any other run ending
+      queue.notifyIdle();
+
+      expect(dispatched).toEqual(["first"]);
+      expect(queue.adapter.steerItems.map((item) => item.prompt)).toEqual([
+        "queued",
+      ]);
+    });
+
+    it("keeps a trailing user message out of the composer without setMessages", async () => {
+      const userMessage = createUserMessage("u1", "Do not duplicate me");
+      const adapter = createBaseAdapter({
+        messages: [userMessage],
+        isRunning: true,
+        onCancel: vi.fn(),
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      core.cancelRun();
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(core.composer.text).toBe("");
+      expect(core.export().messages.map((m) => m.message.id)).toContain("u1");
+    });
+
+    it("keeps the message in the thread when the composer is busy", async () => {
+      const adapter = createBaseAdapter({
+        messages: [createUserMessage("u1", "cancel me")],
+        isRunning: true,
+        onCancel: vi.fn(),
+        setMessages: vi.fn(),
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+      core.composer.setText("something else");
+
+      core.cancelRun();
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(core.composer.text).toBe("something else");
+      expect(core.export().messages.map((m) => m.message.id)).toContain("u1");
+    });
+
+    it("keeps a message with non-text content in the thread", async () => {
+      const userMessage = {
+        ...createUserMessage("u1", "look at this"),
+        content: [
+          { type: "text" as const, text: "look at this" },
+          { type: "image" as const, image: "https://example.com/cat.png" },
+        ],
+      } as ThreadMessage;
+      const adapter = createBaseAdapter({
+        messages: [userMessage],
+        isRunning: true,
+        onCancel: vi.fn(),
+        setMessages: vi.fn(),
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      core.cancelRun();
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(core.composer.text).toBe("");
+      expect(core.export().messages.map((m) => m.message.id)).toContain("u1");
+    });
+
+    it("restores the message whole when the composer is free", async () => {
+      const attachment = {
+        id: "a1",
+        type: "file" as const,
+        name: "spec.pdf",
+        contentType: "application/pdf",
+        status: { type: "complete" as const },
+        content: [],
+      };
+      const quote = { text: "quoted", messageId: "m-1" };
+      const userMessage = {
+        ...createUserMessage("u1", "cancel me"),
+        attachments: [attachment],
+        metadata: { custom: { quote } },
+      } as ThreadMessage;
+      const adapter = createBaseAdapter({
+        messages: [userMessage],
+        isRunning: true,
+        onCancel: vi.fn(),
+        setMessages: vi.fn(),
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      core.cancelRun();
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(core.composer.text).toBe("cancel me");
+      expect(core.composer.attachments).toEqual([attachment]);
+      expect(core.composer.quote).toEqual(quote);
+      expect(core.export().messages.map((m) => m.message.id)).not.toContain(
+        "u1",
+      );
+    });
+
+    it.each([
+      { label: "reports no run", isRunning: false },
+      { label: "omits isRunning", isRunning: undefined },
+    ])(
+      "leaves the unanswered user message of an idle thread in place when the host $label",
+      async ({ isRunning }) => {
+        const onCancel = vi.fn();
+        const setMessages = vi.fn();
+        const core = new ExternalStoreThreadRuntimeCore(
+          contextProvider,
+          createBaseAdapter({
+            messages: [
+              createUserMessage("u1"),
+              createAssistantMessage("a1"),
+              createUserMessage("u2", "unanswered"),
+            ],
+            isRunning,
+            onCancel,
+            setMessages,
+          }),
+        );
+
+        core.cancelRun();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(core.composer.text).toBe("");
+        expect(core.messages.map((m) => m.id)).toEqual(["u1", "a1", "u2"]);
+        expect(setMessages).not.toHaveBeenCalled();
+        expect(onCancel).toHaveBeenCalledOnce();
+      },
+    );
+
+    it("leaves the unanswered user message of an idle thread in place when the composer cancels", async () => {
+      const setMessages = vi.fn();
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({
+          messages: [createUserMessage("u1", "unanswered")],
+          isRunning: false,
+          onCancel: vi.fn(),
+          setMessages,
+        }),
+      );
+
+      core.composer.cancel();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(core.composer.text).toBe("");
+      expect(core.messages.map((m) => m.id)).toEqual(["u1"]);
+      expect(setMessages).not.toHaveBeenCalled();
+    });
+
+    it("writes the rollback before the message sent right after the stop reaches the store", async () => {
+      let hostMessages: readonly ThreadMessage[] = [
+        createUserMessage("u1"),
+        createAssistantMessage("a1"),
+        createUserMessage("u2", "unanswered"),
+      ];
+      const setMessages = vi.fn((messages: readonly ThreadMessage[]) => {
+        hostMessages = messages;
+      });
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({
+          messages: hostMessages,
+          isRunning: true,
+          onCancel: vi.fn(),
+          onNew: vi.fn(async () => {
+            hostMessages = [...hostMessages, createUserMessage("u3")];
+          }),
+          setMessages,
+        }),
+      );
+
+      core.cancelRun();
+      expect(core.composer.text).toBe("unanswered");
+      await core.append({
+        role: "user",
+        content: [{ type: "text", text: "next" }],
+        attachments: [],
+        createdAt: new Date(),
+        parentId: "a1",
+        sourceId: null,
+        runConfig: {},
+        metadata: { custom: {} },
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(hostMessages.map((m) => m.id)).toEqual(["u1", "a1", "u3"]);
+      expect(setMessages).toHaveBeenCalledOnce();
+      expect(core.composer.text).toBe("unanswered");
+    });
+
+    it("writes the rollback before a steered message reaches the store", async () => {
+      let hostMessages: readonly ThreadMessage[] = [
+        createUserMessage("u1"),
+        createAssistantMessage("a1"),
+        createUserMessage("u2", "unanswered"),
+      ];
+      const setMessages = vi.fn((messages: readonly ThreadMessage[]) => {
+        hostMessages = messages;
+      });
+      const queue = createMessageQueue({
+        run: () => {
+          hostMessages = [...hostMessages, createUserMessage("u3")];
+        },
+        cancel: () => core.cancelRun(),
+      });
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({
+          messages: hostMessages,
+          isRunning: true,
+          onCancel: vi.fn(),
+          queue: queue.adapter,
+          setMessages,
+        }),
+      );
+      queue.notifyBusy();
+
+      await core.append({
+        role: "user",
+        content: [{ type: "text", text: "next" }],
+        attachments: [],
+        createdAt: new Date(),
+        parentId: core.messages.at(-1)?.id ?? null,
+        sourceId: null,
+        runConfig: {},
+        metadata: { custom: {} },
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(hostMessages.map((m) => m.id)).toEqual(["u1", "a1", "u3"]);
+      expect(setMessages).toHaveBeenCalledOnce();
+      expect(core.composer.text).toBe("unanswered");
+    });
+
+    it("takes the draft back when the store keeps the stopped message after a send ran the rollback early", async () => {
+      const staleMessages: readonly ThreadMessage[] = [
+        createUserMessage("u1"),
+        createAssistantMessage("a1"),
+        createUserMessage("u2", "unanswered"),
+      ];
+      let hostMessages = staleMessages;
+      const adapter = (isRunning: boolean) =>
+        createBaseAdapter({
+          messages: hostMessages,
+          isRunning,
+          onCancel: vi.fn(),
+          onNew: vi.fn(async () => {
+            hostMessages = [...staleMessages, createUserMessage("u3")];
+          }),
+          setMessages: (messages) => {
+            hostMessages = messages;
+          },
+        });
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        adapter(true),
+      );
+
+      core.cancelRun();
+      expect(core.composer.text).toBe("unanswered");
+      await core.append({
+        role: "user",
+        content: [{ type: "text", text: "next" }],
+        attachments: [],
+        createdAt: new Date(),
+        parentId: "a1",
+        sourceId: null,
+        runConfig: {},
+        metadata: { custom: {} },
+      });
+      core.__internal_setAdapter(adapter(false));
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(core.messages.map((m) => m.id)).toEqual(["u1", "a1", "u2", "u3"]);
+      expect(core.composer.text).toBe("");
+    });
+
+    it("keeps a new positional message when it reuses the stopped leaf's id", async () => {
+      type Raw = { role: "user" | "assistant"; text: string };
+      const convertMessage = (message: Raw): ThreadMessageLike => ({
+        role: message.role,
+        content: [{ type: "text", text: message.text }],
+      });
+      let hostMessages: readonly Raw[] = [
+        { role: "user", text: "first" },
+        { role: "assistant", text: "answer" },
+        { role: "user", text: "unanswered" },
+      ];
+      const setMessages = vi.fn((messages: readonly Raw[]) => {
+        hostMessages = messages;
+      });
+      const adapter = () => ({
+        messages: hostMessages,
+        isRunning: true,
+        convertMessage,
+        setMessages,
+        onCancel: vi.fn(),
+        onNew: async () => {
+          hostMessages = [
+            ...hostMessages,
+            { role: "user" as const, text: "next" },
+          ];
+        },
+      });
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        adapter(),
+      );
+      const stoppedId = core.messages[2]!.id;
+
+      core.cancelRun();
+      await core.append({
+        role: "user",
+        content: [{ type: "text", text: "next" }],
+        attachments: [],
+        createdAt: new Date(),
+        parentId: core.messages.at(-1)?.id ?? null,
+        sourceId: null,
+        runConfig: {},
+        metadata: { custom: {} },
+      });
+      core.__internal_setAdapter(adapter());
+      expect(core.messages[2]?.id).toBe(stoppedId);
+      expect(core.composer.text).toBe("unanswered");
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(hostMessages.map((m) => m.text)).toEqual([
+        "first",
+        "answer",
+        "next",
+      ]);
+      expect(setMessages).toHaveBeenCalledOnce();
+
+      hostMessages = [...hostMessages, { role: "assistant", text: "reply" }];
+      core.__internal_setAdapter(adapter());
+      expect(core.messages.map((m) => getThreadMessageText(m))).toEqual([
+        "first",
+        "answer",
+        "next",
+        "reply",
+      ]);
+      expect(core.composer.text).toBe("unanswered");
+    });
+
+    it("keeps the first moved-leaf watch when a second cancel cannot restore the draft", async () => {
+      const messages = [
+        createUserMessage("u1"),
+        createAssistantMessage("a1"),
+        createUserMessage("u2", "unanswered"),
+      ];
+      const setMessages = vi.fn();
+      const adapter = (messages: readonly ThreadMessage[]) =>
+        createBaseAdapter({
+          messages,
+          isRunning: true,
+          onCancel: vi.fn(),
+          setMessages,
+        });
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        adapter(messages),
+      );
+
+      core.cancelRun();
+      core.cancelRun();
+      expect(core.composer.text).toBe("unanswered");
+
+      core.__internal_setAdapter(
+        adapter([...messages, createAssistantMessage("a2", "answered")]),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(core.messages.map((m) => m.id)).toEqual(["u1", "a1", "u2", "a2"]);
+      expect(core.composer.text).toBe("");
+      expect(setMessages).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { label: "runtime invalidation", invalidate: invalidateThreadRuntime },
+      {
+        label: "session reset",
+        invalidate: (core: ExternalStoreThreadRuntimeCore) =>
+          core.unstable_notifySessionReset(),
+      },
+    ])(
+      "leaves the draft after $label invalidates its watch",
+      async ({ invalidate }) => {
+        const messages = [createUserMessage("u1", "unanswered")];
+        const setMessages = vi.fn();
+        const adapter = (messages: readonly ThreadMessage[]) =>
+          createBaseAdapter({
+            messages,
+            isRunning: true,
+            onCancel: vi.fn(),
+            setMessages,
+          });
+        const core = new ExternalStoreThreadRuntimeCore(
+          contextProvider,
+          adapter(messages),
+        );
+
+        core.cancelRun();
+        invalidate(core);
+        core.__internal_setAdapter(
+          adapter([...messages, createAssistantMessage("a1", "answered")]),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(core.composer.text).toBe("unanswered");
+        expect(setMessages).not.toHaveBeenCalled();
+      },
+    );
+
+    it("clears the moved-leaf watch when the repository changes", async () => {
+      const messages = [createUserMessage("u1", "unanswered")];
+      const setMessages = vi.fn();
+      const adapter = (
+        messages: readonly ThreadMessage[],
+        repository: MessageRepository,
+      ) =>
+        createBaseAdapter({
+          messages,
+          isRunning: true,
+          onCancel: vi.fn(),
+          setMessages,
+          unstable_messageRepositoryInstance: repository,
+        });
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        adapter(messages, new MessageRepository()),
+      );
+
+      core.cancelRun();
+      core.__internal_setAdapter(
+        adapter(
+          [...messages, createAssistantMessage("a1", "answered")],
+          new MessageRepository(),
+        ),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(core.composer.text).toBe("unanswered");
+      expect(setMessages).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("optimistic assistant message", () => {
+    it("adds optimistic assistant message when running with last user message", () => {
+      const userMsg = createUserMessage("u1");
+      const adapter = createBaseAdapter({
+        messages: [userMsg],
+        isRunning: true,
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      const messages = core.messages;
+      expect(messages.length).toBe(2);
+      expect(messages[0]!.id).toBe("u1");
+      expect(messages[1]!.role).toBe("assistant");
+      expect(messages[1]!.content).toEqual([]);
+    });
+
+    it("does not add optimistic message when last message is assistant", () => {
+      const adapter = createBaseAdapter({
+        messages: [createUserMessage("u1"), createAssistantMessage("a1")],
+        isRunning: true,
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      const messages = core.messages;
+      expect(messages.length).toBe(2);
+      expect(messages[1]!.role).toBe("assistant");
+      expect(messages[1]!.id).toBe("a1");
+    });
+
+    it("does not add optimistic message when not running", () => {
+      const adapter = createBaseAdapter({
+        messages: [createUserMessage("u1")],
+        isRunning: false,
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      expect(core.messages.length).toBe(1);
+    });
+  });
+
+  it("updates isDisabled from adapter", () => {
+    const adapter = createBaseAdapter({ isDisabled: true });
+    const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+    expect(core.isDisabled).toBe(true);
+
+    core.__internal_setAdapter(createBaseAdapter({ isDisabled: false }));
+    expect(core.isDisabled).toBe(false);
+  });
+
+  it("does not notify subscribers when the same adapter reference is passed", () => {
+    const adapter = createBaseAdapter({
+      messages: [createUserMessage("u1")],
+    });
+    const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+    const spy = vi.fn();
+    core.subscribe(spy);
+    spy.mockClear();
+
+    core.__internal_setAdapter(adapter);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("notifies subscribers when adapter changes", () => {
+    const adapter1 = createBaseAdapter({
+      messages: [createUserMessage("u1")],
+    });
+    const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter1);
+
+    const callback = vi.fn();
+    core.subscribe(callback);
+    callback.mockClear();
+
+    const adapter2 = createBaseAdapter({
+      messages: [createUserMessage("u1"), createAssistantMessage("a1")],
+    });
+    core.__internal_setAdapter(adapter2);
+    expect(callback).toHaveBeenCalled();
+  });
+
+  describe("switchToBranch", () => {
+    it("throws when setMessages is not provided", () => {
+      const adapter = createBaseAdapter({
+        messages: [createUserMessage("u1")],
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      expect(() => core.switchToBranch("u1")).toThrow(
+        "Runtime does not support switching branches.",
+      );
+    });
+
+    it("silently ignores branch switch while running", () => {
+      const setMessages = vi.fn();
+      const adapter = createBaseAdapter({
+        messages: [createUserMessage("u1"), createAssistantMessage("a1")],
+        isRunning: true,
+        setMessages,
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      core.switchToBranch("u1");
+      expect(setMessages).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("import", () => {
+    it.each(["messages", "messageRepository"] as const)(
+      "throws without onImport and leaves a %s transcript unchanged",
+      (source) => {
+        const messages = [createUserMessage("store-message")];
+        const adapter: ExternalStoreAdapter<ThreadMessage> =
+          source === "messages"
+            ? createBaseAdapter({ messages })
+            : {
+                onNew: vi.fn(async () => {}),
+                messageRepository:
+                  ExportedMessageRepository.fromArray(messages),
+              };
+        const core = new ExternalStoreThreadRuntimeCore(
+          contextProvider,
+          adapter,
+        );
+        const imported = ExportedMessageRepository.fromArray([
+          createUserMessage("imported-message"),
+        ]);
+
+        expect(() => core.import(imported)).toThrow(
+          "Runtime does not support importing messages.",
+        );
+        expect(core.export().messages.map(({ message }) => message.id)).toEqual(
+          ["store-message"],
+        );
+        expect(core.getMessageById("store-message")).toBeDefined();
+        expect(core.getMessageById("imported-message")).toBeUndefined();
+      },
+    );
+
+    it("imports and notifies the store when onImport is provided", () => {
+      const onImport = vi.fn((_messages: readonly ThreadMessage[]) => {});
+      const adapter = createBaseAdapter({
+        messages: [createUserMessage("store-message")],
+        onImport,
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+      const imported = ExportedMessageRepository.fromArray([
+        createUserMessage("imported-message"),
+      ]);
+
+      core.import(imported);
+
+      expect(onImport).toHaveBeenCalledOnce();
+      expect(onImport.mock.calls[0]?.[0].map(({ id }) => id)).toEqual([
+        "imported-message",
+      ]);
+    });
+  });
+
+  describe("exportExternalState and importExternalState", () => {
+    it("delegates export to adapter", () => {
+      const state = { key: "value" };
+      const adapter = createBaseAdapter({
+        onExportExternalState: vi.fn(() => state),
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      expect(core.exportExternalState()).toEqual(state);
+    });
+
+    it("throws on export when adapter has no onExportExternalState", () => {
+      const adapter = createBaseAdapter();
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      expect(() => core.exportExternalState()).toThrow(
+        "Runtime does not support exporting external states.",
+      );
+    });
+
+    it("delegates import to adapter", () => {
+      const onLoadExternalState = vi.fn();
+      const adapter = createBaseAdapter({ onLoadExternalState });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      const state = { key: "value" };
+      core.importExternalState(state);
+      expect(onLoadExternalState).toHaveBeenCalledWith(state);
+    });
+
+    it("throws on import when adapter has no onLoadExternalState", () => {
+      const adapter = createBaseAdapter();
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      expect(() => core.importExternalState({})).toThrow(
+        "Runtime does not support importing external states.",
+      );
+    });
+  });
+
+  describe("unsupported adapter operations", () => {
+    it("beginEdit throws when adapter has no onEdit", () => {
+      const adapter = createBaseAdapter({
+        messages: [createUserMessage("u1")],
+      });
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      expect(() => core.beginEdit("u1")).toThrow(
+        "Runtime does not support editing.",
+      );
+    });
+
+    it("addToolResult throws when adapter has no onAddToolResult", () => {
+      const adapter = createBaseAdapter();
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      expect(() =>
+        core.addToolResult({
+          messageId: "m1",
+          toolName: "tool",
+          toolCallId: "tc1",
+          result: {},
+          isError: false,
+        }),
+      ).toThrow("Runtime does not support tool results.");
+    });
+
+    it("resumeRun throws when adapter has no onResume", async () => {
+      const adapter = createBaseAdapter();
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, adapter);
+
+      await expect(
+        core.resumeRun({ parentId: "msg-1" } as any),
+      ).rejects.toThrow("Runtime does not support resuming runs.");
+    });
+
+    it("throws when adapter has neither messages nor messageRepository", () => {
+      const adapter = {
+        onNew: vi.fn(async () => {}),
+      } as unknown as ExternalStoreAdapter<ThreadMessage>;
+
+      expect(
+        () => new ExternalStoreThreadRuntimeCore(contextProvider, adapter),
+      ).toThrow(
+        "ExternalStoreAdapter must provide either 'messages' or 'messageRepository'",
+      );
+    });
+  });
+
+  describe("tool callbacks", () => {
+    it("keeps the runtime running until an executing client tool settles", async () => {
+      let resolveTool!: (value: { forecast: string }) => void;
+      const execute = vi.fn(
+        () =>
+          new Promise<{ forecast: string }>((resolve) => {
+            resolveTool = resolve;
+          }),
+      );
+      const core = new ExternalStoreThreadRuntimeCore(
+        {
+          getModelContext: () => ({
+            tools: {
+              weatherSearch: {
+                parameters: { type: "object", properties: {} },
+                execute,
+              },
+            },
+          }),
+        },
+        createBaseAdapter({
+          unstable_enableToolInvocations: true,
+          isRunning: false,
+        }),
+      );
+      const onRunEnd = vi.fn();
+      const onUpdate = vi.fn();
+      core.unstable_on("runEnd", onRunEnd);
+      core.subscribe(onUpdate);
+
+      core.__internal_setAdapter(
+        createBaseAdapter({
+          unstable_enableToolInvocations: true,
+          isRunning: false,
+          messages: [
+            {
+              ...createAssistantMessage("a1"),
+              status: { type: "requires-action", reason: "tool-calls" },
+              content: [
+                {
+                  type: "tool-call",
+                  toolCallId: "tc1",
+                  toolName: "weatherSearch",
+                  args: { city: "London" },
+                  argsText: '{"city":"London"}',
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      await vi.waitFor(() => expect(core.isRunning).toBe(true));
+      expect(onRunEnd).not.toHaveBeenCalled();
+
+      onUpdate.mockClear();
+      resolveTool({ forecast: "sunny" });
+
+      await vi.waitFor(() => expect(core.isRunning).toBe(false));
+      expect(onRunEnd).toHaveBeenCalledOnce();
+      expect(onUpdate).toHaveBeenCalled();
+    });
+
+    it("stops running once a human-input request from streamCall is resumed", async () => {
+      const setToolStatuses = vi.fn();
+      const adapter = (messages: ThreadMessage[]) =>
+        createBaseAdapter({
+          unstable_enableToolInvocations: true,
+          isRunning: false,
+          setToolStatuses,
+          messages,
+        });
+      const core = new ExternalStoreThreadRuntimeCore(
+        {
+          getModelContext: () => ({
+            tools: {
+              confirm: {
+                parameters: { type: "object", properties: {} },
+                streamCall: async (_reader, { human }) => {
+                  await human({ request: "confirm" });
+                },
+              },
+            },
+          }),
+        },
+        adapter([]),
+      );
+
+      core.__internal_setAdapter(
+        adapter([
+          {
+            ...createAssistantMessage("a1"),
+            status: { type: "requires-action", reason: "tool-calls" },
+            content: [
+              {
+                type: "tool-call",
+                toolCallId: "tc1",
+                toolName: "confirm",
+                args: {},
+                argsText: "{}",
+              },
+            ],
+          },
+        ]),
+      );
+      await vi.waitFor(() =>
+        expect(setToolStatuses).toHaveBeenLastCalledWith({
+          tc1: {
+            type: "interrupt",
+            payload: { type: "human", payload: { request: "confirm" } },
+          },
+        }),
+      );
+
+      expect(core.capabilities.answerToolCall).toBe(true);
+      core.resumeToolCall({ toolCallId: "tc1", payload: true });
+
+      expect(setToolStatuses).toHaveBeenLastCalledWith({});
+      expect(core.isRunning).toBe(false);
+    });
+
+    it("does not run a client tool whose run is cancelled in the tick it settles", async () => {
+      const execute = vi.fn(async () => ({ forecast: "sunny" }));
+      const onAddToolResult = vi.fn();
+      const withToolCall = (isRunning: boolean) =>
+        createBaseAdapter({
+          unstable_enableToolInvocations: true,
+          isRunning,
+          onCancel: vi.fn(async () => {}),
+          onAddToolResult,
+          messages: [
+            {
+              ...createAssistantMessage("a1"),
+              status: { type: "requires-action", reason: "tool-calls" },
+              content: [
+                {
+                  type: "tool-call",
+                  toolCallId: "tc1",
+                  toolName: "weatherSearch",
+                  args: { city: "London" },
+                  argsText: '{"city":"London"}',
+                },
+              ],
+            },
+          ],
+        });
+      const core = new ExternalStoreThreadRuntimeCore(
+        {
+          getModelContext: () => ({
+            tools: {
+              weatherSearch: {
+                parameters: { type: "object", properties: {} },
+                execute,
+              },
+            },
+          }),
+        },
+        createBaseAdapter({
+          unstable_enableToolInvocations: true,
+          isRunning: false,
+        }),
+      );
+
+      core.__internal_setAdapter(withToolCall(true));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      core.__internal_setAdapter(withToolCall(false));
+      core.cancelRun();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(onAddToolResult).not.toHaveBeenCalled();
+    });
+
+    it("does not run a client tool first published after cancellation", async () => {
+      const execute = vi.fn(async () => ({ forecast: "sunny" }));
+      const onAddToolResult = vi.fn();
+      const adapter = (
+        isRunning: boolean,
+        messages: readonly ThreadMessage[],
+      ) =>
+        createBaseAdapter({
+          unstable_enableToolInvocations: true,
+          isRunning,
+          onCancel: vi.fn(async () => {}),
+          onAddToolResult,
+          messages,
+        });
+      const core = new ExternalStoreThreadRuntimeCore(
+        {
+          getModelContext: () => ({
+            tools: {
+              weatherSearch: {
+                parameters: { type: "object", properties: {} },
+                execute,
+              },
+            },
+          }),
+        },
+        adapter(true, [createUserMessage("u1")]),
+      );
+
+      core.cancelRun();
+      core.__internal_setAdapter(
+        adapter(false, [
+          createUserMessage("u1"),
+          {
+            ...createAssistantMessage("a1"),
+            status: { type: "requires-action", reason: "tool-calls" },
+            content: [
+              {
+                type: "tool-call",
+                toolCallId: "tc1",
+                toolName: "weatherSearch",
+                args: { city: "London" },
+                argsText: '{"city":"London"}',
+              },
+            ],
+          },
+        ]),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(onAddToolResult).not.toHaveBeenCalled();
+    });
+
+    it("runs a steered turn's tool after cancellation", async () => {
+      const execute = vi.fn(async () => ({ forecast: "sunny" }));
+      const run = vi.fn();
+      const queue = createMessageQueue({ run, cancel: vi.fn() });
+      const adapter = (messages: readonly ThreadMessage[]) =>
+        createBaseAdapter({
+          unstable_enableToolInvocations: true,
+          unstable_isClientToolCall: () => true,
+          isRunning: true,
+          onCancel: vi.fn(),
+          queue: queue.adapter,
+          messages,
+        });
+      const core = new ExternalStoreThreadRuntimeCore(
+        {
+          getModelContext: () => ({
+            tools: {
+              weatherSearch: {
+                parameters: { type: "object", properties: {} },
+                execute,
+              },
+            },
+          }),
+        },
+        adapter([createUserMessage("u1")]),
+      );
+      queue.notifyBusy();
+
+      core.cancelRun();
+      await core.append({
+        role: "user",
+        content: [{ type: "text", text: "next" }],
+        attachments: [],
+        createdAt: new Date(),
+        parentId: "u1",
+        sourceId: null,
+        runConfig: {},
+        metadata: { custom: {} },
+        steer: true,
+      });
+      expect(run).toHaveBeenCalledOnce();
+
+      core.__internal_setAdapter(
+        adapter([
+          createUserMessage("u1"),
+          createUserMessage("u2"),
+          {
+            ...createAssistantMessage("a2"),
+            status: { type: "requires-action", reason: "tool-calls" },
+            content: [
+              {
+                type: "tool-call",
+                toolCallId: "new-call",
+                toolName: "weatherSearch",
+                args: { city: "Paris" },
+                argsText: '{"city":"Paris"}',
+              },
+            ],
+          },
+        ]),
+      );
+
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    });
+
+    it.each(["append", "startRun"] as const)(
+      "runs the client tool of a turn started by %s while the replaced run is still active",
+      async (start) => {
+        const execute = vi.fn(async () => ({ forecast: "sunny" }));
+        const adapter = (messages: readonly ThreadMessage[]) =>
+          createBaseAdapter({
+            unstable_enableToolInvocations: true,
+            unstable_isClientToolCall: () => true,
+            isRunning: true,
+            onReload: vi.fn(async () => {}),
+            onAddToolResult: vi.fn(),
+            messages,
+          });
+        const prior = [createUserMessage("u1"), createAssistantMessage("a1")];
+        const core = new ExternalStoreThreadRuntimeCore(
+          {
+            getModelContext: () => ({
+              tools: {
+                weatherSearch: {
+                  parameters: { type: "object", properties: {} },
+                  execute,
+                },
+              },
+            }),
+          },
+          adapter(prior),
+        );
+
+        if (start === "append") {
+          await core.append({
+            role: "user",
+            content: [{ type: "text", text: "next" }],
+            attachments: [],
+            createdAt: new Date(),
+            parentId: "a1",
+            sourceId: null,
+            runConfig: {},
+            metadata: { custom: {} },
+          });
+        } else {
+          await core.startRun({
+            parentId: "u1",
+            sourceId: "a1",
+            runConfig: {},
+          });
+        }
+        core.__internal_setAdapter(
+          adapter([
+            ...prior,
+            createUserMessage("u2"),
+            {
+              ...createAssistantMessage("a2"),
+              status: { type: "requires-action", reason: "tool-calls" },
+              content: [
+                {
+                  type: "tool-call",
+                  toolCallId: "tc2",
+                  toolName: "weatherSearch",
+                  args: { city: "Paris" },
+                  argsText: '{"city":"Paris"}',
+                },
+              ],
+            },
+          ]),
+        );
+
+        await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+      },
+    );
+
+    it("mirrors the adapter running value when tool invocations are disabled", () => {
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter(),
+      );
+
+      expect(core.isRunning).toBeUndefined();
+
+      core.__internal_setAdapter(createBaseAdapter({ isRunning: false }));
+      expect(core.isRunning).toBe(false);
+
+      core.__internal_setAdapter(createBaseAdapter({ isRunning: true }));
+      expect(core.isRunning).toBe(true);
+    });
+
+    it("passes an undefined adapter running value through when no tool is executing", () => {
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({ unstable_enableToolInvocations: true }),
+      );
+
+      expect(core.isRunning).toBeUndefined();
+    });
+
+    it("stops running when the session resets during a tool execution", async () => {
+      const execute = vi.fn(() => new Promise<never>(() => {}));
+      const core = new ExternalStoreThreadRuntimeCore(
+        {
+          getModelContext: () => ({
+            tools: {
+              weatherSearch: {
+                parameters: { type: "object", properties: {} },
+                execute,
+              },
+            },
+          }),
+        },
+        createBaseAdapter({
+          unstable_enableToolInvocations: true,
+          isRunning: false,
+        }),
+      );
+      const onRunEnd = vi.fn();
+      core.unstable_on("runEnd", onRunEnd);
+
+      core.__internal_setAdapter(
+        createBaseAdapter({
+          unstable_enableToolInvocations: true,
+          isRunning: false,
+          messages: [
+            {
+              ...createAssistantMessage("a1"),
+              status: { type: "requires-action", reason: "tool-calls" },
+              content: [
+                {
+                  type: "tool-call",
+                  toolCallId: "tc1",
+                  toolName: "weatherSearch",
+                  args: { city: "London" },
+                  argsText: '{"city":"London"}',
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      await vi.waitFor(() => expect(core.isRunning).toBe(true));
+
+      core.unstable_notifySessionReset();
+
+      expect(core.isRunning).toBe(false);
+      expect(onRunEnd).toHaveBeenCalledOnce();
+
+      execute.mockClear();
+      core.__internal_setAdapter(
+        createBaseAdapter({
+          unstable_enableToolInvocations: true,
+          isRunning: false,
+          messages: [
+            {
+              ...createAssistantMessage("a2"),
+              status: { type: "requires-action", reason: "tool-calls" },
+              content: [
+                {
+                  type: "tool-call",
+                  toolCallId: "tc2",
+                  toolName: "weatherSearch",
+                  args: { city: "Paris" },
+                  argsText: '{"city":"Paris"}',
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(execute).not.toHaveBeenCalled();
+      expect(core.isRunning).toBe(false);
+    });
+
+    it("handles rejected automatic tool result callbacks", async () => {
+      const error = new Error("tool result failed");
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      const execute = vi.fn(async () => ({ forecast: "sunny" }));
+      let callbackCalls = 0;
+      const onAddToolResult = () => {
+        callbackCalls += 1;
+        return Promise.reject(error);
+      };
+      const core = new ExternalStoreThreadRuntimeCore(
+        {
+          getModelContext: () => ({
+            tools: {
+              weatherSearch: {
+                parameters: { type: "object", properties: {} },
+                execute,
+              },
+            },
+          }),
+        },
+        createBaseAdapter({
+          unstable_enableToolInvocations: true,
+          onAddToolResult,
+        }),
+      );
+
+      const rejections = await captureUnhandledRejections(async () => {
+        core.__internal_setAdapter(
+          createBaseAdapter({
+            unstable_enableToolInvocations: true,
+            isRunning: false,
+            messages: [
+              {
+                ...createAssistantMessage("a1"),
+                status: { type: "requires-action", reason: "tool-calls" },
+                content: [
+                  {
+                    type: "tool-call",
+                    toolCallId: "tc1",
+                    toolName: "weatherSearch",
+                    args: { city: "London" },
+                    argsText: '{"city":"London"}',
+                  },
+                ],
+              },
+            ],
+            onAddToolResult,
+          }),
+        );
+
+        await vi.waitFor(() =>
+          expect(consoleError).toHaveBeenCalledWith(
+            "[ExternalStoreThreadRuntimeCore] onAddToolResult callback rejected",
+            error,
+          ),
+        );
+      });
+
+      expect(execute).toHaveBeenCalledOnce();
+      expect(callbackCalls).toBe(1);
+      expect(rejections).toEqual([]);
+    });
+
+    it("handles rejected direct tool result callbacks", async () => {
+      const error = new Error("tool result failed");
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      let callbackCalls = 0;
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({
+          onAddToolResult: () => {
+            callbackCalls += 1;
+            return Promise.reject(error);
+          },
+        }),
+      );
+
+      const rejections = await captureUnhandledRejections(async () => {
+        core.addToolResult({
+          messageId: "m1",
+          toolName: "weatherSearch",
+          toolCallId: "tc1",
+          result: { forecast: "sunny" },
+          isError: false,
+        });
+
+        await vi.waitFor(() =>
+          expect(consoleError).toHaveBeenCalledWith(
+            "[ExternalStoreThreadRuntimeCore] onAddToolResult callback rejected",
+            error,
+          ),
+        );
+      });
+
+      expect(callbackCalls).toBe(1);
+      expect(rejections).toEqual([]);
+    });
+
+    it("hands a rejected onRespondToToolApproval back to the caller", async () => {
+      const error = new Error("approval failed");
+      let callbackCalls = 0;
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({
+          onRespondToToolApproval: () => {
+            callbackCalls += 1;
+            return Promise.reject(error);
+          },
+        }),
+      );
+
+      const rejections = await captureUnhandledRejections(async () => {
+        await expect(
+          core.respondToToolApproval({
+            approvalId: "approval-1",
+            approved: true,
+          }),
+        ).rejects.toBe(error);
+      });
+
+      expect(callbackCalls).toBe(1);
+      expect(rejections).toEqual([]);
+    });
+
+    it("resolves when a synchronous onRespondToToolApproval accepts", async () => {
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({ onRespondToToolApproval: () => {} }),
+      );
+
+      await expect(
+        core.respondToToolApproval({
+          approvalId: "approval-1",
+          approved: true,
+        }),
+      ).resolves.toBeUndefined();
+    });
+
+    it("emits a decision after an approval callback accepts", async () => {
+      const message: ThreadMessage = {
+        ...createAssistantMessage("assistant-1"),
+        status: { type: "requires-action", reason: "tool-calls" },
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "tool-1",
+            toolName: "review",
+            args: {},
+            argsText: "{}",
+            approval: { id: "approval-1" },
+          },
+        ],
+      } as ThreadMessage;
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({
+          messages: [message],
+          onRespondToToolApproval: () => {},
+        }),
+      );
+      const answered = vi.fn();
+      core.unstable_on("toolApprovalAnswered", answered);
+
+      await core.respondToToolApproval({
+        approvalId: "approval-1",
+        approved: true,
+      });
+
+      expect(answered).toHaveBeenCalledWith({
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        toolName: "review",
+        approved: true,
+      });
+    });
+
+    it("handles rejected onCancel callbacks", async () => {
+      const error = new Error("cancel failed");
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      let callbackCalls = 0;
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        createBaseAdapter({
+          onCancel: () => {
+            callbackCalls += 1;
+            return Promise.reject(error);
+          },
+        }),
+      );
+
+      const rejections = await captureUnhandledRejections(async () => {
+        core.cancelRun();
+
+        await vi.waitFor(() =>
+          expect(consoleError).toHaveBeenCalledWith(
+            "[ExternalStoreThreadRuntimeCore] onCancel callback rejected",
+            error,
+          ),
+        );
+      });
+
+      expect(callbackCalls).toBe(1);
+      expect(rejections).toEqual([]);
+    });
+  });
+
+  describe("cancelled turn tool attribution", () => {
+    const toolMessage = (
+      id: string,
+      toolCallId: string,
+      options: {
+        result?: { forecast: string };
+        messages?: readonly ThreadMessage[];
+      } = {},
+    ): ThreadAssistantMessage => ({
+      ...createAssistantMessage(id),
+      status: { type: "requires-action", reason: "tool-calls" },
+      content: [
+        {
+          type: "tool-call",
+          toolCallId,
+          toolName: "weatherSearch",
+          args: { city: "London" },
+          argsText: '{"city":"London"}',
+          ...(options.result && { result: options.result }),
+          ...(options.messages && { messages: options.messages }),
+        },
+      ],
+    });
+    const userMessage = (parentId: string): AppendMessage => ({
+      role: "user",
+      content: [{ type: "text", text: "next" }],
+      attachments: [],
+      createdAt: new Date(),
+      parentId,
+      sourceId: null,
+      runConfig: {},
+      metadata: { custom: {} },
+    });
+    const setup = (
+      messages: readonly ThreadMessage[],
+      isRunning = true,
+      overrides: Partial<ExternalStoreAdapter<ThreadMessage>> = {},
+    ) => {
+      const execute = vi.fn(async () => ({ forecast: "sunny" }));
+      const streamCall = vi.fn();
+      const onAddToolResult = vi.fn();
+      const adapter = (
+        nextMessages: readonly ThreadMessage[],
+        nextIsRunning: boolean,
+        nextOverrides: Partial<ExternalStoreAdapter<ThreadMessage>> = {},
+      ) =>
+        createBaseAdapter({
+          unstable_enableToolInvocations: true,
+          unstable_isClientToolCall: () => true,
+          isRunning: nextIsRunning,
+          onCancel: vi.fn(),
+          onReload: vi.fn(),
+          onResume: vi.fn(),
+          onAddToolResult,
+          messages: nextMessages,
+          ...overrides,
+          ...nextOverrides,
+        });
+      const core = new ExternalStoreThreadRuntimeCore(
+        {
+          getModelContext: () => ({
+            tools: {
+              weatherSearch: {
+                parameters: { type: "object", properties: {} },
+                execute,
+                streamCall,
+              },
+            },
+          }),
+        },
+        adapter(messages, isRunning),
+      );
+      const publish = (
+        nextMessages: readonly ThreadMessage[],
+        nextIsRunning: boolean,
+        nextOverrides: Partial<ExternalStoreAdapter<ThreadMessage>> = {},
+      ) =>
+        core.__internal_setAdapter(
+          adapter(nextMessages, nextIsRunning, nextOverrides),
+        );
+      return { core, execute, streamCall, onAddToolResult, publish };
+    };
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
+
+    it.each([
+      "unnamed at settle",
+      "named before its call",
+      "id swap",
+      "after empty settle",
+    ])("suppresses a cancelled call %s", async (caseName) => {
+      const u1 = createUserMessage("u1");
+      const initial =
+        caseName === "named before its call"
+          ? [u1, createAssistantMessage("a1")]
+          : caseName === "id swap"
+            ? [u1, createAssistantMessage("a-draft")]
+            : [u1];
+      const { core, execute, streamCall, publish } = setup(initial);
+      core.cancelRun();
+      if (caseName === "after empty settle") publish([u1], false);
+      publish([u1, toolMessage("a1", "old-call")], false);
+      await settle();
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(streamCall).not.toHaveBeenCalled();
+    });
+
+    it("suppresses a late call with a run id when Stop precedes activeRunId", async () => {
+      const u1 = createUserMessage("u1");
+      const { core, execute, streamCall, publish } = setup([u1]);
+      core.cancelRun();
+      publish(
+        [
+          u1,
+          {
+            ...toolMessage("a1", "late-call"),
+            metadata: {
+              ...createAssistantMessage("a1").metadata,
+              runId: "srv-1",
+            },
+          },
+        ],
+        false,
+      );
+      await settle();
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(streamCall).not.toHaveBeenCalled();
+    });
+
+    it("suppresses a call in the cancelled message with a different run id", async () => {
+      const u1 = createUserMessage("u1");
+      const a1 = createAssistantMessage("a1");
+      const { core, execute, streamCall, publish } = setup([u1, a1]);
+      core.cancelRun();
+      publish(
+        [
+          u1,
+          {
+            ...toolMessage("a1", "existing-call"),
+            metadata: { ...a1.metadata, runId: "srv-1" },
+          },
+        ],
+        false,
+      );
+      await settle();
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(streamCall).not.toHaveBeenCalled();
+    });
+
+    it("keeps the cancelled scope through a second cancel after settle", async () => {
+      const u1 = createUserMessage("u1");
+      const { core, execute, streamCall, publish } = setup([u1]);
+      core.cancelRun();
+      publish([u1], false);
+      core.cancelRun();
+      publish([u1, toolMessage("a1", "old-call")], false);
+      await settle();
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(streamCall).not.toHaveBeenCalled();
+    });
+
+    it("suppresses a cancelled call first seen with a final result", async () => {
+      const u1 = createUserMessage("u1");
+      const { core, execute, streamCall, publish } = setup([u1]);
+      core.cancelRun();
+      publish(
+        [u1, toolMessage("a1", "old-call", { result: { forecast: "old" } })],
+        false,
+      );
+      await settle();
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(streamCall).not.toHaveBeenCalled();
+    });
+
+    it.each(["before", "during"])(
+      "runs the replacement after a cancelled call lands %s its direct append run",
+      async (arrival) => {
+        const u1 = createUserMessage("u1");
+        const u2 = createUserMessage("u2");
+        const oldCall = toolMessage("a1", "old-call");
+        const { core, execute, streamCall, publish } = setup([u1]);
+        core.cancelRun();
+        await core.append(userMessage("u1"));
+        if (arrival === "before") {
+          publish([u1, oldCall, u2], false);
+          publish([u1, oldCall, u2, toolMessage("a2", "new-call")], true);
+        } else {
+          publish([u1, u2], true);
+          publish([u1, oldCall, u2, toolMessage("a2", "new-call")], true);
+        }
+
+        await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+        expect(execute).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ toolCallId: "new-call" }),
+        );
+        expect(streamCall).toHaveBeenCalledOnce();
+        expect(streamCall).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ toolCallId: "new-call" }),
+        );
+      },
+    );
+
+    it("runs a queued replacement after the cancelled run settles", async () => {
+      const run = vi.fn();
+      const queue = createMessageQueue({ run, cancel: vi.fn() });
+      const u1 = createUserMessage("u1");
+      const { core, execute, publish } = setup([u1], true, {
+        queue: queue.adapter,
+      });
+      queue.notifyBusy();
+      core.cancelRun();
+      publish([u1], false);
+      queue.notifyIdle();
+      await core.append(userMessage("u1"));
+      expect(run).toHaveBeenCalledOnce();
+      publish(
+        [u1, createUserMessage("u2"), toolMessage("a2", "new-call")],
+        true,
+      );
+
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    });
+
+    it("runs a regenerated call after cancellation of a visible assistant", async () => {
+      const u1 = createUserMessage("u1");
+      const { core, execute, publish } = setup([
+        u1,
+        createAssistantMessage("a1"),
+      ]);
+      core.cancelRun();
+      await core.startRun({ parentId: "u1", sourceId: "a1", runConfig: {} });
+      publish([u1, toolMessage("a2", "new-call")], true);
+
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    });
+
+    it("discards a late cancelled call after regeneration under the same parent while running the replacement", async () => {
+      const u1 = createUserMessage("u1");
+      const oldCall = {
+        ...toolMessage("a-old", "old-call"),
+        metadata: {
+          ...createAssistantMessage("a-old").metadata,
+          runId: "old-run",
+        },
+      };
+      const newCall = {
+        ...toolMessage("a-new", "new-call"),
+        metadata: {
+          ...createAssistantMessage("a-new").metadata,
+          runId: "new-run",
+        },
+      };
+      const { core, execute, streamCall, publish } = setup([u1], true, {
+        activeRunId: "old-run",
+      });
+      const branch = (
+        headId: string,
+        assistants: ThreadAssistantMessage[],
+      ) => ({
+        activeRunId: "new-run",
+        messageRepository: {
+          headId,
+          messages: [
+            { message: u1, parentId: null },
+            ...assistants.map((message) => ({ message, parentId: "u1" })),
+          ],
+        },
+      });
+
+      core.cancelRun();
+      await core.startRun({ parentId: "u1", sourceId: null, runConfig: {} });
+      publish([u1, oldCall], true, branch("a-old", [oldCall]));
+      publish([u1, newCall], true, branch("a-new", [oldCall, newCall]));
+
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+      expect(execute).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ toolCallId: "new-call" }),
+      );
+      expect(streamCall).toHaveBeenCalledOnce();
+      expect(streamCall).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ toolCallId: "new-call" }),
+      );
+    });
+
+    it("runs a host-started call under the cancelled parent after settle", async () => {
+      const u1 = createUserMessage("u1");
+      const { core, execute, publish } = setup([u1]);
+      core.cancelRun();
+      publish([u1], false);
+      publish([u1, toolMessage("a2", "new-call")], true);
+
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    });
+
+    it("runs a resumed call after cancellation", async () => {
+      const u1 = createUserMessage("u1");
+      const { core, execute, publish } = setup([u1]);
+      core.cancelRun();
+      await core.resumeRun({ parentId: "u1", sourceId: null, runConfig: {} });
+      publish([u1, toolMessage("a2", "new-call")], true);
+
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    });
+
+    it("runs a tool result continuation of the cancelled assistant", async () => {
+      const u1 = createUserMessage("u1");
+      const a1 = createAssistantMessage("a1");
+      const { core, execute, publish } = setup([u1, a1]);
+      core.cancelRun();
+      publish([u1, a1], false);
+      core.addToolResult({
+        messageId: "a1",
+        toolCallId: "answered-call",
+        toolName: "weatherSearch",
+        result: { forecast: "old" },
+        isError: false,
+      });
+      publish([u1, toolMessage("a1", "new-call")], true);
+
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    });
+
+    it("suppresses a nested call in the cancelled message", async () => {
+      const u1 = createUserMessage("u1");
+      const { core, execute, streamCall, publish } = setup([u1]);
+      core.cancelRun();
+      publish(
+        [
+          u1,
+          toolMessage("a1", "parent-call", {
+            messages: [toolMessage("nested", "child-call")],
+          }),
+        ],
+        false,
+      );
+      await settle();
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(streamCall).not.toHaveBeenCalled();
+    });
+
+    it("does not scope a cancellation while idle", async () => {
+      const u1 = createUserMessage("u1");
+      const { core, execute, publish } = setup([u1], false);
+      core.cancelRun();
+      publish([u1, toolMessage("a1", "new-call")], false);
+
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    });
+
+    it("clears the cancelled scope when the repository changes", async () => {
+      const u1 = createUserMessage("u1");
+      const { core, execute, publish } = setup([u1]);
+      core.cancelRun();
+      const repository = new MessageRepository();
+      const replacement = { unstable_messageRepositoryInstance: repository };
+      publish([u1], false, replacement);
+      publish([u1, toolMessage("a2", "new-call")], false, replacement);
+
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    });
+
+    it("clears cancelled run ids when the repository changes", async () => {
+      const u1 = createUserMessage("u1");
+      const { core, execute, publish } = setup([u1], true, {
+        activeRunId: "old-run",
+      });
+      core.cancelRun();
+      const repository = new MessageRepository();
+      const replacement = { unstable_messageRepositoryInstance: repository };
+      publish([u1], false, replacement);
+      publish(
+        [
+          u1,
+          {
+            ...toolMessage("a1", "new-call"),
+            metadata: {
+              ...createAssistantMessage("a1").metadata,
+              runId: "old-run",
+            },
+          },
+        ],
+        false,
+        replacement,
+      );
+
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    });
+  });
+
+  describe("messageRepository incremental sync", () => {
+    const u1 = createUserMessage("u1");
+    const a1 = createAssistantMessage("a1");
+
+    const repoAdapter = (
+      messages: { message: ThreadMessage; parentId: string | null }[],
+      headId: string | null,
+      overrides: Partial<ExternalStoreAdapter<ThreadMessage>> = {},
+    ): ExternalStoreAdapter<ThreadMessage> => ({
+      messageRepository: { headId, messages },
+      onNew: vi.fn(async () => {}),
+      ...overrides,
+    });
+
+    it("imports the initial repository", () => {
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        repoAdapter([{ message: u1, parentId: null }], "u1"),
+      );
+      expect(core.messages.map((m) => m.id)).toEqual(["u1"]);
+    });
+
+    it("adds a message when the repository is replaced", () => {
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        repoAdapter([{ message: u1, parentId: null }], "u1"),
+      );
+      core.__internal_setAdapter(
+        repoAdapter(
+          [
+            { message: u1, parentId: null },
+            { message: a1, parentId: "u1" },
+          ],
+          "a1",
+        ),
+      );
+      expect(core.messages.map((m) => m.id)).toEqual(["u1", "a1"]);
+    });
+
+    it("deletes a message no longer present in the new repository", () => {
+      const core = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        repoAdapter(
+          [
+            { message: u1, parentId: null },
+            { message: a1, parentId: "u1" },
+          ],
+          "a1",
+        ),
+      );
+      expect(core.messages.map((m) => m.id)).toEqual(["u1", "a1"]);
+
+      core.__internal_setAdapter(
+        repoAdapter([{ message: u1, parentId: null }], "u1"),
+      );
+      expect(core.messages.map((m) => m.id)).toEqual(["u1"]);
+    });
+
+    it("matches a fresh import when built incrementally", () => {
+      const incremental = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        repoAdapter([{ message: u1, parentId: null }], "u1"),
+      );
+      incremental.__internal_setAdapter(
+        repoAdapter(
+          [
+            { message: u1, parentId: null },
+            { message: a1, parentId: "u1" },
+          ],
+          "a1",
+        ),
+      );
+      const fresh = new ExternalStoreThreadRuntimeCore(
+        contextProvider,
+        repoAdapter(
+          [
+            { message: u1, parentId: null },
+            { message: a1, parentId: "u1" },
+          ],
+          "a1",
+        ),
+      );
+      expect(incremental.messages.map((m) => m.id)).toEqual(
+        fresh.messages.map((m) => m.id),
+      );
+    });
+
+    it("coalesces an isRunning flip on an unchanged repository reference", () => {
+      const messageRepository = {
+        headId: "u1",
+        messages: [{ message: u1, parentId: null }],
+      };
+      const onNew = vi.fn(async () => {});
+      const core = new ExternalStoreThreadRuntimeCore(contextProvider, {
+        messageRepository,
+        onNew,
+        isRunning: false,
+      });
+      expect(core.messages.map((m) => m.id)).toEqual(["u1"]);
+
+      core.__internal_setAdapter({ messageRepository, onNew, isRunning: true });
+      expect(core.messages.length).toBe(2);
+      expect(core.messages[1]!.role).toBe("assistant");
+
+      core.__internal_setAdapter({
+        messageRepository,
+        onNew,
+        isRunning: false,
+      });
+      expect(core.messages.map((m) => m.id)).toEqual(["u1"]);
+    });
+  });
+});
+
+describe("ExternalStoreThreadRuntimeCore voice transcripts", () => {
+  const createVoiceAdapter = ({
+    sendText,
+  }: { sendText?: RealtimeVoiceAdapter.Session["sendText"] } = {}) => {
+    let statusCallback:
+      | ((status: RealtimeVoiceAdapter.Status) => void)
+      | undefined;
+    let transcriptCallback:
+      | ((transcript: RealtimeVoiceAdapter.TranscriptItem) => void)
+      | undefined;
+    const session: RealtimeVoiceAdapter.Session = {
+      status: { type: "running" },
+      isMuted: false,
+      disconnect: vi.fn(),
+      mute: vi.fn(),
+      unmute: vi.fn(),
+      ...(sendText && { sendText }),
+      onStatusChange: (callback) => {
+        statusCallback = callback;
+        return () => {
+          statusCallback = undefined;
+        };
+      },
+      onTranscript: (callback) => {
+        transcriptCallback = callback;
+        return () => {
+          transcriptCallback = undefined;
+        };
+      },
+      onModeChange: () => () => {},
+      onVolumeChange: () => () => {},
+    };
+    return {
+      adapter: { connect: () => session } satisfies RealtimeVoiceAdapter,
+      emitStatus: (status: RealtimeVoiceAdapter.Status) =>
+        statusCallback?.(status),
+      emitTranscript: (transcript: RealtimeVoiceAdapter.TranscriptItem) =>
+        transcriptCallback?.(transcript),
+    };
+  };
+
+  const createVoiceCore = ({ commit = true }: { commit?: boolean } = {}) => {
+    const voiceAdapter = createVoiceAdapter();
+    const onNew = vi.fn(async () => {});
+    const onEdit = vi.fn(async () => {});
+    const onReload = vi.fn(async () => {});
+    const onResume = vi.fn(async () => {});
+    const onVoiceTranscript = vi.fn();
+    const core = new ExternalStoreThreadRuntimeCore(
+      createContextProvider(),
+      createBaseAdapter({
+        onNew,
+        onEdit,
+        onReload,
+        onResume,
+        onVoiceTranscript,
+        adapters: { voice: voiceAdapter.adapter },
+      }),
+    );
+    core.connectVoice();
+    voiceAdapter.emitTranscript({
+      role: "assistant",
+      text: "Hello",
+      isFinal: true,
+    });
+    const transcript = core.messages[0]!;
+    if (commit) {
+      core.__internal_setAdapter(
+        createBaseAdapter({
+          messages: [transcript],
+          onNew,
+          onEdit,
+          onReload,
+          onResume,
+          onVoiceTranscript,
+          adapters: { voice: voiceAdapter.adapter },
+        }),
+      );
+      core.disconnectVoice();
+    }
+    return {
+      core,
+      onNew,
+      onEdit,
+      onReload,
+      onResume,
+      transcriptId: transcript.id,
+    };
+  };
+
+  it("waits for a host import already in progress before committing a final transcript", async () => {
+    const voiceAdapter = createVoiceAdapter();
+    const onVoiceTranscript = vi.fn();
+    const adapters = { voice: voiceAdapter.adapter };
+    const core = new ExternalStoreThreadRuntimeCore(
+      createContextProvider(),
+      createBaseAdapter({
+        isLoading: true,
+        onVoiceTranscript,
+        adapters,
+      }),
+    );
+
+    core.connectVoice();
+    expect(core.voice).toBeDefined();
+
+    voiceAdapter.emitTranscript({
+      role: "user",
+      text: "Hello",
+      isFinal: true,
+    });
+    await Promise.resolve();
+    expect(onVoiceTranscript).not.toHaveBeenCalled();
+
+    core.__internal_setAdapter(
+      createBaseAdapter({
+        isLoading: false,
+        onVoiceTranscript,
+        adapters,
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(onVoiceTranscript).toHaveBeenCalledOnce();
+    });
+
+    core.disconnectVoice();
+  });
+
+  it("keeps holding a final transcript when one load ends and the next begins in the same tick", async () => {
+    const voiceAdapter = createVoiceAdapter();
+    const onVoiceTranscript = vi.fn();
+    const render = (isLoading: boolean) =>
+      createBaseAdapter({
+        isLoading,
+        onVoiceTranscript,
+        adapters: { voice: voiceAdapter.adapter },
+      });
+    const core = new ExternalStoreThreadRuntimeCore(
+      createContextProvider(),
+      render(true),
+    );
+    core.connectVoice();
+
+    voiceAdapter.emitTranscript({
+      role: "user",
+      text: "Hello",
+      isFinal: true,
+    });
+    core.__internal_setAdapter(render(false));
+    core.__internal_setAdapter(render(true));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onVoiceTranscript).not.toHaveBeenCalled();
+
+    core.__internal_setAdapter(render(false));
+    await vi.waitFor(() => {
+      expect(onVoiceTranscript).toHaveBeenCalledOnce();
+    });
+
+    core.disconnectVoice();
+  });
+
+  it("waits for a host import started after connection before committing a final transcript", async () => {
+    const voiceAdapter = createVoiceAdapter();
+    const onVoiceTranscript = vi.fn();
+    const historyMessage = createUserMessage("history");
+    const voiceAdapterOptions = {
+      onVoiceTranscript,
+      adapters: { voice: voiceAdapter.adapter },
+    };
+    const core = new ExternalStoreThreadRuntimeCore(
+      createContextProvider(),
+      createBaseAdapter(voiceAdapterOptions),
+    );
+    core.connectVoice();
+
+    core.__internal_setAdapter(
+      createBaseAdapter({
+        ...voiceAdapterOptions,
+        isLoading: true,
+        messages: [historyMessage],
+      }),
+    );
+    voiceAdapter.emitTranscript({
+      role: "user",
+      text: "Hello",
+      isFinal: true,
+    });
+    await Promise.resolve();
+    expect(onVoiceTranscript).not.toHaveBeenCalled();
+
+    core.__internal_setAdapter(
+      createBaseAdapter({
+        ...voiceAdapterOptions,
+        isLoading: false,
+        messages: [historyMessage],
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(onVoiceTranscript).toHaveBeenCalledOnce();
+    });
+
+    core.disconnectVoice();
+  });
+
+  it("waits for a host import started after connection before committing a typed turn", async () => {
+    const sendText = vi.fn(async () => {});
+    const voiceAdapter = createVoiceAdapter({ sendText });
+    const onVoiceTranscript = vi.fn();
+    const voiceAdapterOptions = {
+      onVoiceTranscript,
+      adapters: { voice: voiceAdapter.adapter },
+    };
+    const core = new ExternalStoreThreadRuntimeCore(
+      createContextProvider(),
+      createBaseAdapter(voiceAdapterOptions),
+    );
+    core.connectVoice();
+    core.__internal_setAdapter(
+      createBaseAdapter({
+        ...voiceAdapterOptions,
+        isLoading: true,
+      }),
+    );
+
+    let settled = false;
+    const append = core.append({
+      parentId: null,
+      sourceId: null,
+      role: "user",
+      content: [{ type: "text", text: "Typed" }],
+      attachments: [],
+      metadata: { custom: {} },
+      createdAt: new Date(),
+      runConfig: {},
+    });
+    void append.finally(() => {
+      settled = true;
+    });
+    await vi.waitFor(() => {
+      expect(sendText).toHaveBeenCalledExactlyOnceWith("Typed");
+    });
+    expect(settled).toBe(false);
+    expect(onVoiceTranscript).not.toHaveBeenCalled();
+
+    core.__internal_setAdapter(
+      createBaseAdapter({
+        ...voiceAdapterOptions,
+        isLoading: false,
+      }),
+    );
+    await append;
+
+    expect(onVoiceTranscript).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "user" }),
+    );
+
+    core.disconnectVoice();
+  });
+
+  it("delivers a deferred transcript to the callback the host renders once loading ends", async () => {
+    const voiceAdapter = createVoiceAdapter();
+    const loadingVoiceTranscript = vi.fn();
+    const loadedVoiceTranscript = vi.fn();
+    const core = new ExternalStoreThreadRuntimeCore(
+      createContextProvider(),
+      createBaseAdapter({
+        isLoading: true,
+        onVoiceTranscript: loadingVoiceTranscript,
+        adapters: { voice: voiceAdapter.adapter },
+      }),
+    );
+    core.connectVoice();
+
+    voiceAdapter.emitTranscript({
+      role: "user",
+      text: "Hello",
+      isFinal: true,
+    });
+    core.__internal_setAdapter(
+      createBaseAdapter({
+        isLoading: false,
+        onVoiceTranscript: loadedVoiceTranscript,
+        adapters: { voice: voiceAdapter.adapter },
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(loadedVoiceTranscript).toHaveBeenCalledOnce();
+    });
+    expect(loadedVoiceTranscript).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "user",
+        content: [{ type: "text", text: "Hello" }],
+      }),
+    );
+    expect(loadingVoiceTranscript).not.toHaveBeenCalled();
+
+    core.disconnectVoice();
+  });
+
+  it("drops a deferred transcript when the host routes another conversation through one runtime", async () => {
+    const voiceAdapter = createVoiceAdapter();
+    const onVoiceTranscript = vi.fn();
+    const core = new ExternalStoreThreadRuntimeCore(
+      createContextProvider(),
+      createBaseAdapter({
+        isLoading: true,
+        onVoiceTranscript,
+        unstable_messageRepositoryInstance: new MessageRepository(),
+        adapters: { voice: voiceAdapter.adapter },
+      }),
+    );
+    core.connectVoice();
+
+    voiceAdapter.emitTranscript({
+      role: "user",
+      text: "Hello",
+      isFinal: true,
+    });
+    core.__internal_setAdapter(
+      createBaseAdapter({
+        isLoading: false,
+        onVoiceTranscript,
+        unstable_messageRepositoryInstance: new MessageRepository(),
+        adapters: { voice: voiceAdapter.adapter },
+      }),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(onVoiceTranscript).not.toHaveBeenCalled();
+    expect(core.messages).toHaveLength(0);
+
+    core.disconnectVoice();
+  });
+
+  it("drops a deferred transcript on the runtime the host switched away from", async () => {
+    const voiceAdapter = createVoiceAdapter();
+    const onVoiceTranscript = vi.fn();
+    const render = (threadId: string, isLoading: boolean) =>
+      createBaseAdapter({
+        isLoading,
+        onVoiceTranscript,
+        adapters: { voice: voiceAdapter.adapter, threadList: { threadId } },
+      });
+    const runtime = new ExternalStoreRuntimeCore(render("thread-1", true));
+    const thread = runtime.threads.getMainThreadRuntimeCore();
+    thread.connectVoice();
+
+    voiceAdapter.emitTranscript({
+      role: "user",
+      text: "Hello",
+      isFinal: true,
+    });
+    runtime.setAdapter(render("thread-2", false));
+
+    await vi.waitFor(() => {
+      expect(thread.messages).toEqual([]);
+    });
+    expect(runtime.threads.getMainThreadRuntimeCore()).not.toBe(thread);
+    expect(onVoiceTranscript).not.toHaveBeenCalled();
+    expect(runtime.threads.getMainThreadRuntimeCore().messages).toHaveLength(0);
+    // Loading never ends on the superseded runtime, so the invalidation alone
+    // ended the wait.
+    expect(thread.isLoading).toBe(true);
+
+    thread.disconnectVoice();
+  });
+
+  it("resolves a typed turn deferred on the runtime the host switched away from", async () => {
+    const sendText = vi.fn(async (_text: string) => {});
+    const voiceAdapter = createVoiceAdapter({ sendText });
+    const onVoiceTranscript = vi.fn();
+    const render = (threadId: string, isLoading: boolean) =>
+      createBaseAdapter({
+        isLoading,
+        onVoiceTranscript,
+        adapters: { voice: voiceAdapter.adapter, threadList: { threadId } },
+      });
+    const runtime = new ExternalStoreRuntimeCore(render("thread-1", true));
+    const thread = runtime.threads.getMainThreadRuntimeCore();
+    thread.connectVoice();
+
+    const append = thread.append({
+      parentId: null,
+      sourceId: null,
+      role: "user",
+      content: [{ type: "text", text: "Typed" }],
+      attachments: [],
+      metadata: { custom: {} },
+      createdAt: new Date(),
+      runConfig: {},
+    });
+    await vi.waitFor(() => {
+      expect(thread.messages).toHaveLength(1);
+    });
+    runtime.setAdapter(render("thread-2", false));
+
+    await expect(append).resolves.toBeUndefined();
+    expect(sendText).toHaveBeenCalledExactlyOnceWith("Typed");
+    expect(onVoiceTranscript).not.toHaveBeenCalled();
+    expect(thread.messages).toEqual([]);
+
+    thread.disconnectVoice();
+  });
+
+  it.each([
+    { isLoading: true, state: "loading" },
+    { isLoading: false, state: "loaded" },
+  ])(
+    "drops a typed turn still sending when the host switches away from a $state thread",
+    async ({ isLoading }) => {
+      let finishSend!: () => void;
+      const sendText = vi.fn(
+        (_text: string) =>
+          new Promise<void>((resolve) => {
+            finishSend = resolve;
+          }),
+      );
+      const voiceAdapter = createVoiceAdapter({ sendText });
+      const onVoiceTranscript = vi.fn();
+      const render = (threadId: string, loading: boolean) =>
+        createBaseAdapter({
+          isLoading: loading,
+          onVoiceTranscript,
+          adapters: { voice: voiceAdapter.adapter, threadList: { threadId } },
+        });
+      const runtime = new ExternalStoreRuntimeCore(
+        render("thread-1", isLoading),
+      );
+      const thread = runtime.threads.getMainThreadRuntimeCore();
+      thread.connectVoice();
+
+      const append = thread.append({
+        parentId: null,
+        sourceId: null,
+        role: "user",
+        content: [{ type: "text", text: "Typed" }],
+        attachments: [],
+        metadata: { custom: {} },
+        createdAt: new Date(),
+        runConfig: {},
+      });
+      expect(sendText).toHaveBeenCalledExactlyOnceWith("Typed");
+      runtime.setAdapter(render("thread-2", false));
+      finishSend();
+
+      await expect(append).resolves.toBeUndefined();
+      expect(onVoiceTranscript).not.toHaveBeenCalled();
+      expect(thread.messages).toEqual([]);
+
+      thread.disconnectVoice();
+    },
+  );
+
+  it.each([
+    { failure: "the session ends", rejects: false },
+    { failure: "sendText rejects", rejects: true },
+  ])(
+    "resolves a typed turn on the runtime the host switched away from when $failure",
+    async ({ rejects }) => {
+      let finishSend!: () => void;
+      let failSend!: (error: Error) => void;
+      const sendText = vi.fn(
+        (_text: string) =>
+          new Promise<void>((resolve, reject) => {
+            finishSend = resolve;
+            failSend = reject;
+          }),
+      );
+      const voiceAdapter = createVoiceAdapter({ sendText });
+      const onVoiceTranscript = vi.fn();
+      const render = (threadId: string) =>
+        createBaseAdapter({
+          onVoiceTranscript,
+          adapters: { voice: voiceAdapter.adapter, threadList: { threadId } },
+        });
+      const runtime = new ExternalStoreRuntimeCore(render("thread-1"));
+      const thread = runtime.threads.getMainThreadRuntimeCore();
+      thread.connectVoice();
+
+      const append = thread.append({
+        parentId: null,
+        sourceId: null,
+        role: "user",
+        content: [{ type: "text", text: "Typed" }],
+        attachments: [],
+        metadata: { custom: {} },
+        createdAt: new Date(),
+        runConfig: {},
+      });
+      runtime.setAdapter(render("thread-2"));
+      if (rejects) {
+        failSend(new Error("offline"));
+      } else {
+        thread.disconnectVoice();
+        finishSend();
+      }
+
+      await expect(append).resolves.toBeUndefined();
+      expect(onVoiceTranscript).not.toHaveBeenCalled();
+      expect(thread.messages).toEqual([]);
+
+      thread.disconnectVoice();
+    },
+  );
+
+  it("hands a final transcript to onVoiceTranscript and drops the side list copy once the host carries it", () => {
+    const voiceAdapter = createVoiceAdapter();
+    const onVoiceTranscript = vi.fn();
+    const core = new ExternalStoreThreadRuntimeCore(
+      createContextProvider(),
+      createBaseAdapter({
+        onVoiceTranscript,
+        adapters: { voice: voiceAdapter.adapter },
+      }),
+    );
+    core.connectVoice();
+
+    try {
+      voiceAdapter.emitTranscript({
+        role: "user",
+        text: "Hello",
+        isFinal: true,
+      });
+      const message = core.messages[0]!;
+
+      expect(message.role).toBe("user");
+      expect(getThreadMessageText(message)).toBe("Hello");
+      expect(message.metadata.modality).toBe("voice");
+
+      expect(onVoiceTranscript).toHaveBeenCalledExactlyOnceWith(message);
+
+      core.__internal_setAdapter(
+        createBaseAdapter({
+          messages: [message],
+          onVoiceTranscript,
+          adapters: { voice: voiceAdapter.adapter },
+        }),
+      );
+
+      expect(core.messages.filter(({ id }) => id === message.id)).toEqual([
+        message,
+      ]);
+    } finally {
+      core.disconnectVoice();
+    }
+  });
+
+  it("takes back a spoken user turn that the host echoes through convertMessage", () => {
+    const voiceAdapter = createVoiceAdapter();
+    const onVoiceTranscript = vi.fn();
+    const convertMessage = (message: ThreadMessage) => message;
+    const core = new ExternalStoreThreadRuntimeCore(
+      createContextProvider(),
+      createBaseAdapter({
+        convertMessage,
+        onVoiceTranscript,
+        adapters: { voice: voiceAdapter.adapter },
+      }),
+    );
+    core.connectVoice();
+
+    try {
+      voiceAdapter.emitTranscript({
+        role: "user",
+        text: "Hello",
+        isFinal: true,
+      });
+      const message = core.messages[0]!;
+      expect(onVoiceTranscript).toHaveBeenCalledExactlyOnceWith(message);
+      expect(message).not.toHaveProperty("status");
+
+      core.__internal_setAdapter(
+        createBaseAdapter({
+          messages: [message],
+          convertMessage,
+          onVoiceTranscript,
+          adapters: { voice: voiceAdapter.adapter },
+        }),
+      );
+
+      expect(core.messages.map(({ id }) => id)).toEqual([message.id]);
+      expect(core.messages[0]!.metadata.modality).toBe("voice");
+    } finally {
+      core.disconnectVoice();
+    }
+  });
+
+  it("hands a typed message to onVoiceTranscript as a typed turn without reaching onNew", async () => {
+    const sendText = vi.fn(async (_text: string) => {});
+    const voiceAdapter = createVoiceAdapter({ sendText });
+    const onNew = vi.fn(async () => {});
+    const onVoiceTranscript = vi.fn();
+    const core = new ExternalStoreThreadRuntimeCore(
+      createContextProvider(),
+      createBaseAdapter({
+        onNew,
+        onVoiceTranscript,
+        adapters: { voice: voiceAdapter.adapter },
+      }),
+    );
+    core.connectVoice();
+
+    try {
+      voiceAdapter.emitTranscript({
+        role: "user",
+        text: "Hello",
+        isFinal: true,
+      });
+      const transcript = core.messages[0]!;
+      expect(core.voice?.canSendText).toBe(true);
+
+      await core.append({
+        parentId: transcript.id,
+        sourceId: null,
+        role: "user",
+        content: [{ type: "text", text: "Typed" }],
+        attachments: [],
+        metadata: { custom: {} },
+        createdAt: new Date(),
+        runConfig: {},
+      });
+
+      expect(sendText).toHaveBeenCalledExactlyOnceWith("Typed");
+      expect(onNew).not.toHaveBeenCalled();
+      const typed = core.messages[1]!;
+      expect(typed.role).toBe("user");
+      expect(getThreadMessageText(typed)).toBe("Typed");
+      expect(typed.metadata.modality).toBeUndefined();
+      expect(onVoiceTranscript).toHaveBeenLastCalledWith(typed);
+
+      core.__internal_setAdapter(
+        createBaseAdapter({
+          messages: [transcript, typed],
+          onNew,
+          onVoiceTranscript,
+          adapters: { voice: voiceAdapter.adapter },
+        }),
+      );
+
+      expect(core.messages.map(({ id }) => id)).toEqual([
+        transcript.id,
+        typed.id,
+      ]);
+    } finally {
+      core.disconnectVoice();
+    }
+  });
+
+  it("keeps transcripts for the session when the host has no onVoiceTranscript", () => {
+    const voiceAdapter = createVoiceAdapter();
+    const core = new ExternalStoreThreadRuntimeCore(
+      createContextProvider(),
+      createBaseAdapter({ adapters: { voice: voiceAdapter.adapter } }),
+    );
+    core.connectVoice();
+
+    voiceAdapter.emitTranscript({
+      role: "user",
+      text: "Hello",
+      isFinal: true,
+    });
+
+    expect(core.messages).toHaveLength(1);
+
+    core.disconnectVoice();
+
+    expect(core.messages).toEqual([]);
+  });
+
+  describe("when onVoiceTranscript throws for the reply still being spoken", () => {
+    const commitError = new Error("host store rejected the transcript");
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    const setupSpeakingSession = () => {
+      const voiceAdapters: ReturnType<typeof createVoiceAdapter>[] = [];
+      const sessions: RealtimeVoiceAdapter.Session[] = [];
+      const adapter: RealtimeVoiceAdapter = {
+        connect: () => {
+          const voiceAdapter = createVoiceAdapter();
+          voiceAdapters.push(voiceAdapter);
+          const session = voiceAdapter.adapter.connect();
+          sessions.push(session);
+          return session;
+        },
+      };
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      const core = new ExternalStoreThreadRuntimeCore(
+        createContextProvider(),
+        createBaseAdapter({
+          onVoiceTranscript: () => {
+            throw commitError;
+          },
+          adapters: { voice: adapter },
+        }),
+      );
+      core.connectVoice();
+      voiceAdapters[0]!.emitTranscript({
+        role: "assistant",
+        text: "Hel",
+        isFinal: false,
+      });
+      return { core, sessions, consoleError };
+    };
+
+    it("still disconnects the session on hang up and reports the error", async () => {
+      const { core, sessions, consoleError } = setupSpeakingSession();
+
+      expect(() => core.disconnectVoice()).not.toThrow();
+      expect(sessions[0]!.disconnect).toHaveBeenCalledOnce();
+      expect(core.voice).toBeUndefined();
+      await Promise.resolve();
+      expect(consoleError).toHaveBeenCalledWith(
+        "[ngx-assistant] Voice message commit failed",
+        commitError,
+      );
+    });
+
+    it("disconnects the previous session before connecting a new one", () => {
+      const { core, sessions } = setupSpeakingSession();
+
+      core.connectVoice();
+
+      expect(sessions).toHaveLength(2);
+      expect(sessions[0]!.disconnect).toHaveBeenCalledOnce();
+      expect(sessions[1]!.disconnect).not.toHaveBeenCalled();
+    });
+
+    it("disconnects the session when the thread runtime is discarded", () => {
+      const { core, sessions } = setupSpeakingSession();
+
+      supersedeThreadRuntime(core);
+
+      expect(sessions[0]!.disconnect).toHaveBeenCalledOnce();
+      expect(core.voice).toBeUndefined();
+    });
+
+    it("keeps recording the rest of the session after the user interrupts the reply", async () => {
+      const voiceAdapter = createVoiceAdapter();
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      const onVoiceTranscript = vi.fn((_message: ThreadMessage) => {
+        if (onVoiceTranscript.mock.calls.length === 1) throw commitError;
+      });
+      const core = new ExternalStoreThreadRuntimeCore(
+        createContextProvider(),
+        createBaseAdapter({
+          onVoiceTranscript,
+          adapters: { voice: voiceAdapter.adapter },
+        }),
+      );
+      core.connectVoice();
+      voiceAdapter.emitTranscript({
+        role: "assistant",
+        text: "Hel",
+        isFinal: false,
+      });
+
+      expect(() =>
+        voiceAdapter.emitTranscript({
+          role: "user",
+          text: "Stop",
+          isFinal: true,
+        }),
+      ).not.toThrow();
+      voiceAdapter.emitTranscript({
+        role: "assistant",
+        text: "Sure",
+        isFinal: false,
+      });
+      voiceAdapter.emitTranscript({
+        role: "assistant",
+        text: "Sure thing",
+        isFinal: true,
+      });
+
+      expect(core.messages.map(getThreadMessageText)).toEqual([
+        "Hel",
+        "Stop",
+        "Sure thing",
+      ]);
+      expect(
+        onVoiceTranscript.mock.calls.map(([message]) =>
+          getThreadMessageText(message),
+        ),
+      ).toEqual(["Hel", "Stop", "Sure thing"]);
+      await Promise.resolve();
+      expect(consoleError).toHaveBeenCalledWith(
+        "[ngx-assistant] Voice message commit failed",
+        commitError,
+      );
+    });
+
+    it("shows a final user transcript whose commit throws after a finished reply", async () => {
+      const voiceAdapter = createVoiceAdapter();
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      const onVoiceTranscript = vi.fn((message: ThreadMessage) => {
+        if (message.role === "user") throw commitError;
+      });
+      const core = new ExternalStoreThreadRuntimeCore(
+        createContextProvider(),
+        createBaseAdapter({
+          onVoiceTranscript,
+          adapters: { voice: voiceAdapter.adapter },
+        }),
+      );
+      core.connectVoice();
+      voiceAdapter.emitTranscript({
+        role: "assistant",
+        text: "Hello",
+        isFinal: true,
+      });
+      expect(core.messages.map(getThreadMessageText)).toEqual(["Hello"]);
+      const listener = vi.fn();
+      core.subscribe(listener);
+
+      voiceAdapter.emitTranscript({
+        role: "user",
+        text: "Stop",
+        isFinal: true,
+      });
+
+      expect(core.messages.map(getThreadMessageText)).toEqual([
+        "Hello",
+        "Stop",
+      ]);
+      expect(listener).toHaveBeenCalled();
+      await Promise.resolve();
+      expect(consoleError).toHaveBeenCalledWith(
+        "[ngx-assistant] Voice message commit failed",
+        commitError,
+      );
+    });
+  });
+
+  it("parents a send after the session ended on the last repository message", async () => {
+    const voiceAdapter = createVoiceAdapter();
+    const onNew = vi.fn(async () => {});
+    const core = new ExternalStoreThreadRuntimeCore(
+      createContextProvider(),
+      createBaseAdapter({
+        onNew,
+        adapters: { voice: voiceAdapter.adapter },
+      }),
+    );
+    core.connectVoice();
+
+    try {
+      voiceAdapter.emitTranscript({
+        role: "user",
+        text: "Hello",
+        isFinal: true,
+      });
+      const transcript = core.messages[0]!;
+      voiceAdapter.emitStatus({ type: "ended", reason: "finished" });
+
+      await core.append({
+        parentId: transcript.id,
+        sourceId: null,
+        role: "user",
+        content: [{ type: "text", text: "Follow up" }],
+        attachments: [],
+        metadata: { custom: {} },
+        createdAt: new Date(),
+        runConfig: {},
+        startRun: false,
+      });
+
+      expect(onNew).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ parentId: null }),
+      );
+    } finally {
+      core.disconnectVoice();
+    }
+  });
+
+  it("rejects a text send while connected before reaching the store", async () => {
+    const { core, onNew, onEdit, transcriptId } = createVoiceCore({
+      commit: false,
+    });
+    try {
+      const edit: AppendMessage = {
+        parentId: null,
+        sourceId: transcriptId,
+        role: "user",
+        content: [{ type: "text", text: "again" }],
+        attachments: [],
+        metadata: { custom: {} },
+        createdAt: new Date(),
+        runConfig: {},
+      };
+
+      await expect(core.append(edit)).rejects.toThrow(
+        "Cannot send a text message while a voice session is connected",
+      );
+      await expect(core.append({ ...edit, startRun: false })).rejects.toThrow(
+        "Cannot send a text message while a voice session is connected",
+      );
+      expect(onNew).not.toHaveBeenCalled();
+      expect(onEdit).not.toHaveBeenCalled();
+    } finally {
+      core.disconnectVoice();
+    }
+  });
+
+  it("rejects a run while connected before reaching the store", async () => {
+    const { core, onReload, onResume, transcriptId } = createVoiceCore({
+      commit: false,
+    });
+    try {
+      await expect(
+        core.startRun({
+          parentId: null,
+          sourceId: transcriptId,
+          runConfig: {},
+        }),
+      ).rejects.toThrow(
+        "Cannot start a run while a voice session is connected",
+      );
+      await expect(
+        core.resumeRun({
+          parentId: null,
+          sourceId: transcriptId,
+          runConfig: {},
+        }),
+      ).rejects.toThrow(
+        "Cannot start a run while a voice session is connected",
+      );
+      expect(onReload).not.toHaveBeenCalled();
+      expect(onResume).not.toHaveBeenCalled();
+    } finally {
+      core.disconnectVoice();
+    }
+  });
+});

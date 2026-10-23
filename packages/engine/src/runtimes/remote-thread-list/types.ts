@@ -1,0 +1,162 @@
+import type { ThreadMessage } from "../../types/message";
+import type { AssistantRuntime } from "../../runtime/api/assistant-runtime";
+import type { AssistantStream } from "assistant-stream";
+import type { ThreadHistoryAdapter } from "../../adapters/thread-history";
+import type { AttachmentAdapter } from "../../adapters/attachment";
+import type { FeedbackAdapter } from "../../adapters/feedback";
+import type { ModelContextProvider } from "../../model-context/types";
+
+/* oxlint-disable typescript/no-explicit-any -- structural stand-in for a component type without depending on UI framework types */
+type RemoteThreadListProviderProps = { children?: any };
+
+export type RemoteThreadListProviderComponent =
+  | ((props: RemoteThreadListProviderProps) => any)
+  | (new (props: RemoteThreadListProviderProps) => any);
+/* oxlint-enable typescript/no-explicit-any */
+
+export type RemoteThreadInitializeResponse = {
+  remoteId: string;
+  externalId?: string | undefined;
+};
+
+export type RemoteThreadMetadata = {
+  readonly status: "regular" | "archived";
+  readonly remoteId: string;
+  readonly externalId?: string | undefined;
+  readonly title?: string | undefined;
+  readonly lastMessageAt?: Date | undefined;
+  readonly custom?: Record<string, unknown> | undefined;
+};
+
+export type RemoteThreadListResponse = {
+  threads: RemoteThreadMetadata[];
+  nextCursor?: string | undefined;
+};
+
+export type RemoteThreadListPageOptions = {
+  after?: string | undefined;
+};
+
+export type RuntimeAdapters = {
+  modelContext?: ModelContextProvider | undefined;
+  history?: ThreadHistoryAdapter | undefined;
+  attachments?: AttachmentAdapter | undefined;
+  feedback?: FeedbackAdapter | undefined;
+};
+
+export type RemoteThreadListAdapter = {
+  list(params?: RemoteThreadListPageOptions): Promise<RemoteThreadListResponse>;
+
+  rename(remoteId: string, newTitle: string): Promise<void>;
+  updateCustom?(
+    remoteId: string,
+    custom: Record<string, unknown> | undefined,
+  ): Promise<void>;
+  archive(remoteId: string): Promise<void>;
+  /**
+   * Restores an archived thread. Omit it when the backend cannot unarchive:
+   * switching to an archived thread then opens it as archived, and an explicit
+   * unarchive rejects.
+   */
+  unarchive?(remoteId: string): Promise<void>;
+  delete(remoteId: string): Promise<void>;
+  /**
+   * Creates a thread with draft metadata passed in `options.custom`. Draft
+   * metadata reaches the backend only through this call, so an adapter that
+   * ignores `options.custom` drops it on the next `list()`.
+   */
+  initialize(
+    threadId: string,
+    options?: { custom?: Record<string, unknown> | undefined },
+  ): Promise<RemoteThreadInitializeResponse>;
+  /**
+   * Generates a title for the thread and streams it back.
+   *
+   * Called automatically once the first message settles and, if the thread still has no title, again after its first run ends (completion, error, or cancellation). A backend that titles the thread asynchronously may keep the stream open until its title is ready.
+   *
+   * When the generation persists the title itself, the returned stream must
+   * not complete before that write has landed. Concurrent generations are
+   * ordered by stream completion, and a run whose write outlives its stream
+   * can overwrite a newer title.
+   */
+  generateTitle(
+    remoteId: string,
+    unstable_messages: readonly ThreadMessage[],
+  ): Promise<AssistantStream>;
+  fetch(threadId: string): Promise<RemoteThreadMetadata>;
+
+  /**
+   * Optional component wrapped around each active thread, an older way to
+   * inject per-thread adapters such as history or attachments. Prefer
+   * `unstable_useAdapters`.
+   *
+   * The Provider must render `children` on its first render; deferring them
+   * behind a loading state is unsupported and leaves thread context
+   * unavailable to downstream consumers. Load data inside an always-mounted
+   * child instead.
+   *
+   * @deprecated Experimental since 2025-01-03. Not scheduled for removal; the API may change in any release.
+   */
+  unstable_Provider?: RemoteThreadListProviderComponent | undefined;
+
+  /**
+   * Called by the binding once per mounted thread body (the main-thread slot
+   * by default; every started thread with `backgroundThreads`) to provide
+   * per-thread adapters. It is not called per listed thread. Resolve
+   * `threadListItem` lazily on each adapter call; do not capture it when the
+   * thread mounts. Memoize the returned object.
+   *
+   * Per-thread history loaders run once per mounted thread, so the thread
+   * must be keyed by its id; otherwise one instance is kept across switches
+   * and the next thread's messages never load.
+   *
+   * @deprecated Experimental since 2026-08-18. Not scheduled for removal; the API may change in any release.
+   */
+  unstable_useAdapters?: (() => RuntimeAdapters | null | undefined) | undefined;
+};
+
+export type RemoteThreadListOptions = {
+  runtimeHook: () => AssistantRuntime;
+
+  /**
+   * The adapter reference should remain stable across renders. Replacing it reloads the list and drops cached threads that are not in the replacement page. In-flight mutations from the previous adapter are cancelled.
+   */
+  adapter: RemoteThreadListAdapter;
+
+  /**
+   * When provided, the runtime starts on this thread instead of creating a
+   * new empty thread. Useful for URL-based routing (e.g. `/chat/[threadId]`)
+   * where the initial thread is known at mount time.
+   *
+   * @deprecated Use `threadId` instead, which also reacts to subsequent changes.
+   */
+  initialThreadId?: string | undefined;
+
+  /**
+   * The current thread ID to display. When this value changes, the runtime
+   * automatically switches to the specified thread. Set to `undefined` to
+   * switch to a new thread.
+   */
+  threadId?: string | undefined;
+
+  /**
+   * Called whenever the runtime changes the active thread's canonical (remote)
+   * ID, so the value can be treated as a managed/controlled variable (e.g.
+   * synced to a URL query param). Changes initiated by the controlled
+   * `threadId` option are not echoed back. Together these options form the
+   * controlled pattern: `threadId` in, `onThreadIdChange` out.
+   *
+   * Only the settled remote ID is emitted: while a freshly created thread is
+   * still optimistic (no remote ID yet) the value is `undefined`, and the real
+   * ID is emitted once the thread is initialized. The transient local ID is
+   * never surfaced.
+   */
+  onThreadIdChange?: ((threadId: string | undefined) => void) | undefined;
+
+  /**
+   * When true, if this runtime is used inside another RemoteThreadListRuntime,
+   * it becomes a no-op and simply calls the runtimeHook directly.
+   * This allows wrapping runtimes that internally use RemoteThreadListRuntime.
+   */
+  allowNesting?: boolean | undefined;
+};
