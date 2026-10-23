@@ -22,7 +22,9 @@
     "dist",
     "src",
     "!src/**/*.test.ts",
-    "!src/tests"
+    "!src/tests",
+    "NOTICE",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.lib.json && tsc-alias -p tsconfig.lib.json --resolve-full-paths",
