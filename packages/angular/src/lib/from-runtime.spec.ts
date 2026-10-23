@@ -263,6 +263,19 @@ describe('fromRuntime', () => {
     injector.destroy();
   });
 
+  it('subscribes nothing through a destroyed component injector', () => {
+    @Component({ changeDetection: ChangeDetectionStrategy.OnPush, template: '' })
+    class Empty {}
+
+    const fixture = TestBed.createComponent(Empty);
+    const injector = fixture.componentRef.injector;
+    fixture.destroy();
+    const runtime = new FakeRuntime();
+
+    expect(() => fromRuntime(runtime, undefined, { injector })).toThrow(/NG0911/);
+    expect(runtime.subscriptions).toBe(0);
+  });
+
   it('requires an injection context or an injector', () => {
     expect(() => fromRuntime(new FakeRuntime(), (s) => s.selected)).toThrow(/NG0203/);
   });
