@@ -114,8 +114,8 @@ in the background report the run, initialization and model context events. A mis
 Callbacks run on a microtask, after the runtime has notified, so they read the updated state and
 can write signals. Errors, thrown or rejected, go to Angular's `ErrorHandler`.
 
-- `composer.send` reports the composers' own sends: not the send that ends an edit, and not
-  `thread.append(...)`.
+- `composer.send` reports the composers' own sends, including the send that ends an edit (whose
+  `messageId` is the edited message, not the one that replaces it), but not `thread.append(...)`.
 - `thread.initialize` also reaches a subscription that starts on, or follows the selection to, a
   thread that is already initialized, once.
 

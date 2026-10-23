@@ -344,6 +344,47 @@ describe('injectNxaEvent', () => {
       runtime.destroy();
     });
 
+    it('reports the send that ends an edit, with the edited message', async () => {
+      const runtime = runtimeInjector(replyModel(), twoMessages);
+      const thread = runtime.runInContext(() => injectThread());
+      const message = injectorWith(
+        provideMessageScope(() => thread.getMessageById('m0')),
+        runtime,
+      );
+      const threadComposer = listen(runtime, 'composer.send');
+      const editComposer = listen(message, 'composer.send');
+      const first = injectorWith(
+        provideMessageScope(() => thread.getMessageByIndex(0)),
+        runtime,
+      );
+      const byIndex = listen(first, 'composer.send');
+      const viaMessage = listen(message, { scope: 'message', event: 'composer.send' });
+      const viaThread = listen(runtime, { scope: 'thread', event: 'composer.send' });
+
+      const edit = thread.getMessageById('m0').composer;
+      edit.beginEdit();
+      edit.setText('edited');
+      edit.send();
+      await waitFor(() => !thread.getState().isRunning);
+      await flush();
+
+      const expected = {
+        threadId: thread.getState().threadId,
+        messageId: 'm0',
+        chars: 6,
+        attachments: 0,
+      };
+      expect(edit.getState().isEditing).toBe(false);
+      expect(threadComposer.calls).toEqual([]);
+      expect(editComposer.calls).toEqual([expected]);
+      expect(byIndex.calls).toEqual([expected]);
+      expect(viaMessage.calls).toEqual([expected]);
+      expect(viaThread.calls).toEqual([expected]);
+      first.destroy();
+      message.destroy();
+      runtime.destroy();
+    });
+
     it('in the thread scope, follows the edit composers of messages added later', async () => {
       const injector = runtimeInjector(replyModel(), { adapters: { attachments } });
       const { calls } = listen(injector, { scope: 'thread', event: 'composer.attachmentAdd' });
