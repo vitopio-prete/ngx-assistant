@@ -14,6 +14,8 @@ import { toMessagePartStatus } from "../../utils/normalizePartStatus";
 import { convertExternalMessageChunk } from "../utils/external-message-conversion";
 import { ExternalStoreRuntimeCore } from "../../runtimes/external-store/external-store-runtime-core";
 import { AssistantRuntimeImpl } from "./assistant-runtime";
+import { LocalRuntimeCore } from "../../runtimes/local/local-runtime-core";
+import type { AttachmentAdapter } from "../../adapters/attachment";
 
 const messagePath = {
   ref: "threads.main.messages[0]",
@@ -506,5 +508,156 @@ describe("MessageRuntimeImpl.reload when the runtime rejects", () => {
       "[ngx-assistant] Message reload failed",
       error,
     );
+  });
+});
+
+describe("MessageRuntime edit composer send event", () => {
+  const makeThread = (attachments?: AttachmentAdapter) => {
+    const core = new LocalRuntimeCore(
+      {
+        adapters: {
+          chatModel: { run: async () => ({ content: [] }) },
+          ...(attachments ? { attachments } : {}),
+        },
+      },
+      [{ id: "u1", role: "user", content: [{ type: "text", text: "hi" }] }],
+    );
+    return new AssistantRuntimeImpl(core).thread;
+  };
+
+  it("reaches listeners of the message composer when the edit is sent", async () => {
+    const thread = makeThread();
+    const composer = thread.getMessageById("u1").composer;
+    const onSend = vi.fn();
+    composer.unstable_on("send", onSend);
+
+    composer.beginEdit();
+    composer.setText("edited");
+    composer.send();
+
+    expect(onSend).toHaveBeenCalledExactlyOnceWith({
+      chars: 6,
+      attachments: 0,
+    });
+    expect(composer.getState().isEditing).toBe(false);
+  });
+
+  it("reaches listeners of a message taken by index, before its branch moves", async () => {
+    const thread = makeThread();
+    const message = thread.getMessageByIndex(0);
+    const sent: (string | undefined)[] = [];
+    message.composer.unstable_on("send", () => {
+      sent.push(message.getState().id);
+    });
+
+    message.composer.beginEdit();
+    message.composer.setText("edited");
+    message.composer.send();
+
+    expect(sent).toEqual(["u1"]);
+    expect(message.getState().id).not.toBe("u1");
+  });
+
+  it("reaches them once the attachments of the edit are uploaded", async () => {
+    let finishUpload!: () => void;
+    const upload = new Promise<void>((resolve) => {
+      finishUpload = resolve;
+    });
+    const thread = makeThread({
+      accept: "*",
+      add: async ({ file }) => ({
+        id: "file-1",
+        type: "document",
+        name: file.name,
+        file,
+        status: { type: "requires-action", reason: "composer-send" },
+      }),
+      send: async (attachment) => {
+        await upload;
+        return {
+          ...attachment,
+          status: { type: "complete" },
+          content: [{ type: "text", text: "uploaded" }],
+        };
+      },
+      remove: async () => {},
+    });
+    const composer = thread.getMessageById("u1").composer;
+    const onSend = vi.fn();
+    composer.unstable_on("send", onSend);
+
+    composer.beginEdit();
+    await composer.addAttachment(
+      new File(["hello"], "file.txt", { type: "text/plain" }),
+    );
+    composer.setText("edited");
+    composer.send();
+    expect(onSend).not.toHaveBeenCalled();
+
+    finishUpload();
+
+    await vi.waitFor(() =>
+      expect(onSend).toHaveBeenCalledExactlyOnceWith({
+        chars: 6,
+        attachments: 1,
+      }),
+    );
+    expect(composer.getState().isEditing).toBe(false);
+  });
+
+  it("is not reported for an edit cancelled while its attachments upload", async () => {
+    let finishUpload!: () => void;
+    const upload = new Promise<void>((resolve) => {
+      finishUpload = resolve;
+    });
+    const thread = makeThread({
+      accept: "*",
+      add: async ({ file }) => ({
+        id: "file-1",
+        type: "document",
+        name: file.name,
+        file,
+        status: { type: "requires-action", reason: "composer-send" },
+      }),
+      send: async (attachment) => {
+        await upload;
+        return {
+          ...attachment,
+          status: { type: "complete" },
+          content: [{ type: "text", text: "uploaded" }],
+        };
+      },
+      remove: async () => {},
+    });
+    const composer = thread.getMessageById("u1").composer;
+    const onSend = vi.fn();
+    composer.unstable_on("send", onSend);
+
+    composer.beginEdit();
+    await composer.addAttachment(
+      new File(["hello"], "file.txt", { type: "text/plain" }),
+    );
+    composer.setText("edited");
+    composer.send();
+    composer.cancel();
+    finishUpload();
+    await new Promise((resolve) => setTimeout(resolve));
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(thread.getState().messages.map((m) => m.id)).toEqual(["u1"]);
+  });
+
+  it("is not reported for an edit that is cancelled", async () => {
+    const thread = makeThread();
+    const composer = thread.getMessageById("u1").composer;
+    const onSend = vi.fn();
+    composer.unstable_on("send", onSend);
+
+    composer.beginEdit();
+    composer.setText("edited");
+    composer.cancel();
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(composer.getState().isEditing).toBe(false);
   });
 });
