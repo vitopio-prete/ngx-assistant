@@ -2,7 +2,8 @@
   "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
   "version": 1,
   "cli": {
-    "packageManager": "pnpm"
+    "packageManager": "pnpm",
+    "schematicCollections": ["angular-eslint"]
   },
   "newProjectRoot": "packages",
   "projects": {
@@ -28,6 +29,12 @@
           "builder": "@angular/build:unit-test",
           "options": {
             "tsConfig": "packages/angular/tsconfig.spec.json"
+          }
+        },
+        "lint": {
+          "builder": "@angular-eslint/builder:lint",
+          "options": {
+            "lintFilePatterns": ["packages/angular/**/*.ts", "packages/angular/**/*.html"]
           }
         }
       }

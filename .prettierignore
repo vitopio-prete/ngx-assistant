@@ -1,0 +1,7 @@
+# The engine sources keep their own formatting.
+packages/engine/src/
+
+dist/
+coverage/
+.angular/
+pnpm-lock.yaml
