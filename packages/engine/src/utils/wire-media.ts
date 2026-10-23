@@ -1,0 +1,92 @@
+import { dataUrlMediaType, isParsableUrl, parseDataUrl } from "./data-url";
+import { detectImageMediaType } from "./image-media-type";
+
+/**
+ * The media type to declare for an `ImageMessagePart`, which carries none of
+ * its own: an attachment's content type, then the payload's data URL
+ * declaration, then its leading bytes, then `image/png`.
+ *
+ * The floor cannot be a wildcard. `image/*` is rejected outright by the AI SDK
+ * for a url source and whenever inline bytes fail to sniff, so it fails exactly
+ * where a fallback is needed.
+ */
+export function resolveImageMediaType(
+  image: string,
+  contentType?: string | undefined,
+): string {
+  if (contentType?.startsWith("image/") && !contentType.includes("*")) {
+    return contentType;
+  }
+
+  const declared = dataUrlMediaType(image);
+  if (declared?.startsWith("image/") && !declared.includes("*")) {
+    return declared;
+  }
+
+  // Read through a data URL envelope too, so a generic one such as
+  // `application/octet-stream` does not mask the format. A url of any other
+  // scheme has no local bytes to read.
+  const parsed = parseDataUrl(image);
+  const payload = parsed?.data ?? (isParsableUrl(image) ? undefined : image);
+  if (payload !== undefined) {
+    const sniffed = detectImageMediaType(payload);
+    if (sniffed) return sniffed;
+  }
+
+  return "image/png";
+}
+
+/**
+ * The media type to declare for a `FileMessagePart`: its own `mimeType`, then
+ * the data URL's media type without parameters (`application/octet-stream`
+ * when a base64 payload omits one, `text/plain` otherwise). Non-data-URL
+ * payloads without a declared type use `application/octet-stream`.
+ *
+ * `mimeType` is a plain string, and an adapter reading `file.type` on a file
+ * the OS cannot type yields `""`, so the declared value is not always present.
+ */
+export function resolveFileMediaType(
+  data: string,
+  mimeType?: string | undefined,
+): string {
+  return mimeType || dataUrlMediaType(data) || "application/octet-stream";
+}
+
+/**
+ * A payload placed into a wire field that is contractually a url.
+ *
+ * Two hazards drive this. A consumer may hand the value to an unguarded
+ * `new URL()`, so a payload that is not a url has to be wrapped; and a data
+ * URL's own media type wins over a separately declared one downstream, so a
+ * base64 envelope that disagrees with `mediaType` or omits one is rebuilt
+ * around the same bytes. A media-less percent-encoded data URL is stamped with
+ * its resolved type without changing its payload. A base64 data URL whose
+ * payload carries percent escapes is rebuilt around the decoded bytes, because
+ * downstream consumers pass the payload to providers without decoding it.
+ * Everything else passes through byte for byte, including an explicitly
+ * declared percent-encoded data URL whose declaration is authoritative for the
+ * bytes it carries.
+ */
+export function toMediaWireUrl(payload: string, mediaType: string): string {
+  const parsed = parseDataUrl(payload, "");
+  if (parsed) {
+    if (parsed.mimeType !== mediaType) {
+      return `data:${mediaType};base64,${parsed.data}`;
+    }
+    const comma = payload.indexOf(",");
+    return parsed.data === payload.slice(comma + 1)
+      ? payload
+      : `${payload.slice(0, comma + 1)}${parsed.data}`;
+  }
+
+  const percentEncodedDataUrl = /^data:([^,]*),(.*)$/i.exec(payload);
+  if (
+    percentEncodedDataUrl &&
+    percentEncodedDataUrl[1]!.split(";", 1)[0] === ""
+  ) {
+    return `data:${mediaType}${percentEncodedDataUrl[1]},${percentEncodedDataUrl[2]}`;
+  }
+
+  if (isParsableUrl(payload)) return payload;
+  return `data:${mediaType};base64,${payload}`;
+}

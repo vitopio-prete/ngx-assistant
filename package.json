@@ -3,8 +3,10 @@
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
-    "build": "ng build @ngx-assistant/angular",
-    "test": "ng test @ngx-assistant/angular --watch=false"
+    "build": "pnpm --filter @ngx-assistant/engine build && ng build @ngx-assistant/angular",
+    "test": "pnpm --filter @ngx-assistant/engine test && ng test @ngx-assistant/angular --watch=false",
+    "typecheck": "pnpm --filter @ngx-assistant/engine typecheck",
+    "smoke": "pnpm --filter @ngx-assistant/engine smoke"
   },
   "private": true,
   "packageManager": "pnpm@10.28.0",

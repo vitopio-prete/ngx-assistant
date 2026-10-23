@@ -1,0 +1,66 @@
+import type { ThreadMessage } from "../../types/message";
+
+export const symbolInnerMessage = Symbol("innerMessage");
+const symbolInnerMessages = Symbol("innerMessages");
+
+type WithInnerMessages<T> = {
+  [symbolInnerMessage]?: T | T[];
+  [symbolInnerMessages]?: T[];
+};
+
+const EMPTY_ARRAY: never[] = [];
+
+/**
+ * Attach the original external store message(s) to a ThreadMessage or message part.
+ * This is a no-op if the target already has a bound message.
+ * Use `getExternalStoreMessages` to retrieve the bound messages later.
+ *
+ * @deprecated Experimental since 2026-02-25. Not scheduled for removal; the API may change in any release.
+ */
+export const bindExternalStoreMessage = <T>(
+  target: object,
+  message: T | T[],
+): void => {
+  if (symbolInnerMessage in target) return;
+  (target as WithInnerMessages<T>)[symbolInnerMessage] = message;
+};
+
+export const getExternalStoreMessages = <T>(
+  input:
+    | { messages: readonly ThreadMessage[] }
+    | ThreadMessage
+    | ThreadMessage["content"][number],
+) => {
+  const container = (
+    "messages" in input && !("type" in input && input.type === "tool-call")
+      ? input.messages
+      : input
+  ) as WithInnerMessages<T>;
+  const value = container[symbolInnerMessages] || container[symbolInnerMessage];
+  if (!value) return EMPTY_ARRAY;
+  if (Array.isArray(value)) {
+    return value;
+  }
+  container[symbolInnerMessages] = [value];
+  return container[symbolInnerMessages];
+};
+
+export const FALLBACK_ID_PREFIX = "__external_store_fallback_";
+
+export const dedupeMessagesById = <T extends { readonly id: string }>(
+  messages: readonly T[],
+  onDuplicate: (id: string) => void,
+): readonly T[] => {
+  const seenIds = new Set<string>();
+  const deduped: T[] = [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!;
+    if (seenIds.has(message.id)) {
+      onDuplicate(message.id);
+      continue;
+    }
+    seenIds.add(message.id);
+    deduped.push(message);
+  }
+  return deduped.length === messages.length ? messages : deduped.reverse();
+};
