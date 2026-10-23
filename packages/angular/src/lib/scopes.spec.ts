@@ -65,7 +65,7 @@ describe('scopes', () => {
   it('throws a descriptive error outside a runtime provider', () => {
     const injector = root();
     expect(() => injector.runInContext(() => injectThread())).toThrow(
-      '[ngx-assistant] No thread scope here: provide a runtime with provideLocalRuntime(...) on an ancestor.',
+      '[ngx-assistant] No thread scope here: provide a runtime with provideLocalRuntime(...) or provideExternalStoreRuntime(...) on an ancestor.',
     );
     expect(() => injector.runInContext(() => injectMessage())).toThrow(
       '[ngx-assistant] No message scope here',

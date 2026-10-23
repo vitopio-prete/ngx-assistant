@@ -75,7 +75,8 @@ function injectScope<T>(
   return runtime;
 }
 
-const ASSISTANT_HINT = 'provide a runtime with provideLocalRuntime(...) on an ancestor.';
+const ASSISTANT_HINT =
+  'provide a runtime with provideLocalRuntime(...) or provideExternalStoreRuntime(...) on an ancestor.';
 
 /** The nearest assistant runtime. */
 export function injectAssistant(
