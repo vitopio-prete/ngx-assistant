@@ -10,10 +10,14 @@
   },
   "peerDependencies": {
     "@angular/common": "^22.2.0",
-    "@angular/core": "^22.2.0"
+    "@angular/core": "^22.2.0",
+    "@ngx-assistant/engine": "0.0.0"
   },
   "dependencies": {
     "tslib": "^2.3.0"
+  },
+  "devDependencies": {
+    "@ngx-assistant/engine": "workspace:*"
   },
   "sideEffects": false
 }
