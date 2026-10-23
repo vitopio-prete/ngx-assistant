@@ -84,6 +84,9 @@ importers:
 
   apps/demo:
     dependencies:
+      '@ngx-assistant/angular':
+        specifier: workspace:*
+        version: link:../../packages/angular
       '@ngx-assistant/engine':
         specifier: workspace:*
         version: link:../../packages/engine

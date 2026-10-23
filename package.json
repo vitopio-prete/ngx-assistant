@@ -4,7 +4,7 @@
   "scripts": {
     "ng": "ng",
     "prepare": "lefthook install",
-    "dev": "pnpm --filter @ngx-assistant/engine build && ng serve demo",
+    "dev": "pnpm --filter @ngx-assistant/engine build && ng build @ngx-assistant/angular && ng serve demo",
     "build": "pnpm --filter @ngx-assistant/engine build && ng build @ngx-assistant/angular && ng build demo",
     "test": "pnpm --filter @ngx-assistant/engine test && pnpm --filter @ngx-assistant/engine build && ng test @ngx-assistant/angular --watch=false",
     "e2e": "pnpm --filter @ngx-assistant/demo e2e",

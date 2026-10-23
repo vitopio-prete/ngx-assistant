@@ -1,15 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed } from '@angular/core';
-import { AssistantRuntimeImpl, LocalRuntimeCore } from '@ngx-assistant/engine';
+import { fromRuntime, injectThread, provideLocalRuntime } from '@ngx-assistant/angular';
 import { echoModel } from './echo-model';
-import { fromRuntime, injectAssistantRuntime, provideAssistantRuntime } from './runtime';
-
-const createRuntime = () =>
-  new AssistantRuntimeImpl(new LocalRuntimeCore({ adapters: { chatModel: echoModel } }, []));
 
 @Component({
   selector: 'nxa-demo-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [provideAssistantRuntime(createRuntime)],
+  providers: [provideLocalRuntime(echoModel)],
   template: `
     <h1>ngx-assistant demo</h1>
     <ul id="messages">
@@ -37,7 +33,7 @@ const createRuntime = () =>
   `,
 })
 export class App {
-  private readonly thread = injectAssistantRuntime().thread;
+  private readonly thread = injectThread();
   protected readonly messages = fromRuntime(this.thread, (s) => s.messages);
   protected readonly isRunning = fromRuntime(this.thread, (s) => s.isRunning);
   protected readonly text = fromRuntime(this.thread.composer, (s) => s.text);
