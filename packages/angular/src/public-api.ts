@@ -6,3 +6,4 @@ export * from './lib/version';
 export * from './lib/from-runtime';
 export * from './lib/scopes';
 export * from './lib/local-runtime';
+export * from './lib/events';
