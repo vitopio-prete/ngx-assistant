@@ -7,6 +7,7 @@
     "dev": "pnpm --filter @ngx-assistant/engine build && ng serve demo",
     "build": "pnpm --filter @ngx-assistant/engine build && ng build @ngx-assistant/angular && ng build demo",
     "test": "pnpm --filter @ngx-assistant/engine test && ng test @ngx-assistant/angular --watch=false",
+    "e2e": "pnpm --filter @ngx-assistant/demo e2e",
     "typecheck": "pnpm --filter @ngx-assistant/engine typecheck",
     "smoke": "pnpm --filter @ngx-assistant/engine smoke",
     "lint": "eslint .",
