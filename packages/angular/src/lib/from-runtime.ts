@@ -62,13 +62,15 @@ export function fromRuntime<S, T>(
   const injector = options?.injector ?? inject(Injector);
 
   const version = signal(0);
-  const unsubscribe = runtime.subscribe(() => version.update((v) => v + 1));
   let destroyed = false;
   let last: { value: T } | undefined;
+  // Registered before subscribing: an injector that is already destroyed throws here, before
+  // the subscription could leak.
   injector.get(DestroyRef).onDestroy(() => {
     destroyed = true;
     unsubscribe();
   });
+  const unsubscribe = runtime.subscribe(() => version.update((v) => v + 1));
 
   return computed(
     () => {

@@ -85,6 +85,42 @@ Runtimes notify synchronously, so change them from event handlers, effects or li
 inside a `computed` or a template expression, where Angular rejects the resulting signal write
 (NG0600).
 
+## Events
+
+`injectNxaEvent(selector, callback, options?)` calls `callback` whenever an event fires, until the
+injector is destroyed or the returned ref's `destroy()` is called.
+
+```ts
+injectNxaEvent('thread.runEnd', ({ threadId }) => this.saved.set(threadId));
+injectNxaEvent({ scope: 'thread', event: 'message.error' }, ({ messageId }) =>
+  this.toast(messageId),
+);
+```
+
+| Event                                                           | Heard in                                        |
+| --------------------------------------------------------------- | ----------------------------------------------- |
+| `thread.runStart`, `runEnd`, `initialize`, `modelContextUpdate` | `thread`, `threads`, `*`                        |
+| `thread.historyWriteError`, `toolApprovalAnswered`              | `thread`, `threads`, `*`                        |
+| `composer.send`, `attachmentAdd`, `attachmentAddError`          | `composer`, `message`, `thread`, `threads`, `*` |
+| `message.error`                                                 | `message`, `thread`, `threads`, `*`             |
+| `threads.selectionChanged`                                      | `threads`, `*`                                  |
+
+A plain event name is heard in the nearest scope of its source: `'composer.attachmentAdd'` inside
+a message scope hears that message's edit composer. `{ scope, event }` widens it: `'thread'` hears
+the thread composer and the edit composer of every message, `'threads'` and `'*'` the whole
+assistant. There, the main thread reports every event, and the threads a thread list keeps running
+in the background report the run, initialization and model context events. A missing scope throws.
+
+Callbacks run on a microtask, after the runtime has notified, so they read the updated state and
+can write signals. Errors, thrown or rejected, go to Angular's `ErrorHandler`.
+
+- `composer.send` reports the composers' own sends: not the send that ends an edit, and not
+  `thread.append(...)`.
+- `thread.initialize` also reaches a subscription that starts on, or follows the selection to, a
+  thread that is already initialized, once.
+
+## Build and test
+
 ```bash
 pnpm ng build @ngx-assistant/angular   # output in dist/angular
 pnpm ng test @ngx-assistant/angular
