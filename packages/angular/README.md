@@ -156,9 +156,10 @@ import {
   that belong to an IME composition never send. With the `queue` capability, Ctrl/Cmd+Shift+Enter
   sends the draft ahead of the queue.
 - `cancelOnEscape` (default `true`), `addAttachmentOnPaste` (default `true`).
-- `autoFocus`: takes the focus when the input appears. With it, `focusOnRunStart` and
-  `focusOnThreadSwitched` (both default `true`) bring the focus back when the thread composer starts
-  a run, unless the focus is elsewhere on the page, and when the thread list switches threads.
+- `autoFocus`: takes the focus when the input appears. With it, `focusOnRunStart`,
+  `focusOnThreadSwitched` and `focusOnScrollToBottom` (all default `true`) bring the focus back when
+  the thread composer starts a run, unless the focus is elsewhere on the page, when the thread list
+  switches threads and when the surrounding thread viewport is scrolled to the bottom.
 - `disabled` adds to the composer state; `nxaComposerSend` and `nxaComposerCancel` take it too.
 
 The primitives listen on their own element, before the listeners of your template on the same
@@ -168,8 +169,59 @@ submit, so Angular forms (`NgForm`, `[formGroup]`), which prevent the default su
 same `<form>`.
 
 Ending an edit from the keyboard, with Escape or a keyboard activation of the cancel button, moves
-the focus to the thread composer of the same thread root (an element with `data-nxa-thread-root`),
-unless a handler moved it elsewhere.
+the focus to the thread composer of the same thread root (`nxaThreadRoot`), unless a handler moved
+it elsewhere.
+
+## Thread primitives
+
+Headless directives for the frame of a thread: the root, the scrollable viewport and what sits in
+it.
+
+```ts
+import {
+  NxaScrollToBottom,
+  NxaThreadRoot,
+  NxaThreadViewport,
+  NxaThreadViewportFooter,
+} from '@ngx-assistant/angular';
+```
+
+```html
+<section nxaThreadRoot>
+  <div nxaThreadViewport class="viewport">
+    <!-- messages -->
+    <div nxaThreadViewportFooter class="footer">
+      <button nxaScrollToBottom aria-label="Scroll to bottom">↓</button>
+      <form nxaComposerRoot>...</form>
+    </div>
+  </div>
+</section>
+```
+
+| Directive                   | Behavior                                                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `[nxaThreadRoot]`           | Sets `data-nxa-thread-root`, which bounds the composer focus rules. An unhandled Escape stops the thread's speech. |
+| `[nxaThreadViewport]`       | Keeps the thread pinned to the bottom while the reader is there. Sets `data-nxa-at-bottom` while at the bottom.    |
+| `[nxaThreadViewportFooter]` | Adds its height to the viewport's bottom inset, so content under a sticky footer still counts as at the bottom.    |
+| `button[nxaScrollToBottom]` | Scrolls the viewport to the bottom. Disabled while it is already there, or outside a viewport.                     |
+
+`nxaThreadViewport` needs a bounded height and `overflow-y: auto`. While the reader sits at the
+bottom, growing content (a streaming reply, an image that loads, a footer that grows) keeps it
+there; scrolling up stops the follow until the reader returns to the bottom. A wheel, touch,
+pointer or scroll key cancels a scroll still in flight, and opening a collapsed disclosure inside
+a message (`aria-expanded="false"`, a closed `<details>`) pauses the follow so the opened content
+stays in view. When older messages are prepended, the rows the reader is looking at stay in place.
+Messages are found by their `data-nxa-message-id` attribute. A viewport nested in another one
+takes over the scroll channel for its content.
+
+Options, all default `true`: `autoScroll` (follow growing content), `scrollToBottomOnInitialize`
+(scroll down once the thread has messages), `scrollToBottomOnRunStart`,
+`scrollToBottomOnThreadSwitch`. The directive provides `NXA_THREAD_VIEWPORT` to its content and is
+exported as `nxaThreadViewport`, with `isAtBottom()`, `scrollToBottom(behavior?)`,
+`registerContentInset()` and `onScrollToBottom(callback)`.
+
+`nxaScrollToBottom` takes `behavior` (default `'auto'`) and `disabled`, and can be vetoed like the
+composer buttons.
 
 ## Build and test
 
