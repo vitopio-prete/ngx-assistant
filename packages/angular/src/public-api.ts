@@ -10,3 +10,4 @@ export * from './lib/external-store-runtime';
 export * from './lib/events';
 export * from './lib/composer';
 export * from './lib/thread';
+export * from './lib/messages';
