@@ -1,4 +1,5 @@
 import {
+  DestroyRef,
   Directive,
   ElementRef,
   afterRenderEffect,
@@ -11,6 +12,7 @@ import {
 import { injectNxaEvent } from '../events';
 import { fromRuntime } from '../from-runtime';
 import { injectAssistant, injectComposer, injectThread } from '../scopes';
+import { NXA_THREAD_VIEWPORT } from '../thread/thread-viewport';
 import {
   COMPOSER_SELECTOR,
   cancelWithFocus,
@@ -42,7 +44,8 @@ export type NxaSubmitMode = 'enter' | 'ctrlEnter' | 'none';
  *   written back. Disabled while the thread is disabled or dictation holds the input. While the
  *   composer is not editing (an edit composer before `beginEdit`), typing and pasting are ignored.
  * - With `autoFocus`, the input takes the focus when it appears, when the thread composer starts
- *   a run and when the thread list switches threads.
+ *   a run, when the thread list switches threads and when `nxaScrollToBottom` (or the viewport's
+ *   `scrollToBottom()`) scrolls the surrounding thread viewport.
  *
  * A capture-phase `keydown` or `paste` listener can veto the primitive with `preventDefault()`.
  *
@@ -76,6 +79,8 @@ export class NxaComposerInput {
   readonly focusOnRunStart = input(true, { transform: booleanAttribute });
   /** With `autoFocus`, whether switching threads moves the focus here. */
   readonly focusOnThreadSwitched = input(true, { transform: booleanAttribute });
+  /** With `autoFocus`, whether scrolling the thread viewport to the bottom moves the focus here. */
+  readonly focusOnScrollToBottom = input(true, { transform: booleanAttribute });
   /** Disables the input on top of the composer state. */
   readonly disabled = input(false, { transform: booleanAttribute });
 
@@ -113,6 +118,13 @@ export class NxaComposerInput {
         injectNxaEvent('threads.selectionChanged', () => {
           if (this.focusOnThreadSwitched()) this.focus();
         });
+      }
+      const viewport = inject(NXA_THREAD_VIEWPORT, { optional: true });
+      if (viewport) {
+        const remove = viewport.onScrollToBottom(() => {
+          if (this.focusOnScrollToBottom()) this.focus();
+        });
+        inject(DestroyRef).onDestroy(remove);
       }
     }
   }

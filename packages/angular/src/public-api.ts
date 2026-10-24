@@ -9,3 +9,4 @@ export * from './lib/local-runtime';
 export * from './lib/external-store-runtime';
 export * from './lib/events';
 export * from './lib/composer';
+export * from './lib/thread';
