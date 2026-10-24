@@ -442,6 +442,42 @@ describe("DefaultEditComposerRuntimeCore", () => {
       await sendTask;
     });
 
+    it("reports the send before handing the edit over and ending it", async () => {
+      const order: string[] = [];
+      const { runtime } = makeRuntime(
+        undefined,
+        vi.fn(() => {
+          order.push("append");
+        }),
+      );
+      const composer = new DefaultEditComposerRuntimeCore(
+        runtime,
+        () => order.push("end"),
+        { parentId: null, message: makeUserMessage() },
+      );
+      composer.unstable_on("send", (payload) => {
+        order.push("send");
+        expect(payload).toEqual({ chars: 7, attachments: 0 });
+      });
+      composer.setText("changed");
+      await composer.send();
+      expect(order).toEqual(["send", "append", "end"]);
+    });
+
+    it("ignores a send started by a send listener", async () => {
+      const { runtime, append } = makeRuntime();
+      const composer = new DefaultEditComposerRuntimeCore(runtime, vi.fn(), {
+        parentId: null,
+        message: makeUserMessage(),
+      });
+      const onSend = vi.fn(() => void composer.send());
+      composer.unstable_on("send", onSend);
+      composer.setText("changed");
+      await composer.send();
+      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(append).toHaveBeenCalledTimes(1);
+    });
+
     it("invokes endEditCallback on cancel", () => {
       const endEdit = vi.fn();
       const { runtime } = makeRuntime();

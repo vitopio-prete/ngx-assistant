@@ -21,8 +21,12 @@ export type AttachmentAddErrorEvent = {
 
 export type ComposerRuntimeEventPayload = {
   /**
-   * Fired after a send with the size of what went out. The composer state is
-   * already cleared when it fires, so the counts are only available here.
+   * Fired after a send with the size of what went out. A thread composer's
+   * state is already cleared when it fires, so the counts are only available
+   * here. An edit composer fires it just before handing the edit to the
+   * runtime and ends the edit right after: it still holds the edit, but what
+   * goes out is settled, and neither a send nor a cancel from a listener
+   * changes it.
    */
   send: {
     readonly chars: number;

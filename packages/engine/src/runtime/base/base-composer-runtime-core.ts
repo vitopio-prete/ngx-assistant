@@ -193,6 +193,17 @@ export abstract class BaseComposerRuntimeCore
   }
 
   /**
+   * Whether a send is reported before the runtime takes it rather than after.
+   * A composer whose hand-off moves the thread away from it reports first, or
+   * listeners that follow it would be unbound by the time it reports.
+   */
+  protected get reportsSendBeforeHandOff(): boolean {
+    return false;
+  }
+
+  private _reportingSend = false;
+
+  /**
    * The ids of the thread's messages of a role, or undefined when this
    * composer's sends do not render in the thread. A dispatched submission
    * stays in transit until a message of its role that was not there at
@@ -322,7 +333,7 @@ export abstract class BaseComposerRuntimeCore
   }
 
   public async send(options?: SendOptions) {
-    if (!this.canSend || this.isSubmitting) return;
+    if (!this.canSend || this.isSubmitting || this._reportingSend) return;
 
     this._dictationSessionController.cancel();
 
@@ -483,6 +494,22 @@ export abstract class BaseComposerRuntimeCore
         ]);
     }
 
+    const reportSend = () =>
+      this._notifyEventSubscribers("send", {
+        chars: draft.text.length,
+        attachments: attachments.length,
+      });
+    if (this.reportsSendBeforeHandOff) {
+      // The draft is still in place while this send is reported, so a send
+      // started by a listener would dispatch it a second time.
+      this._reportingSend = true;
+      try {
+        reportSend();
+      } finally {
+        this._reportingSend = false;
+      }
+    }
+
     const cleanupOwner = this.cleanupOwner;
     const cleanupEpoch = cleanupOwner._draftEpoch;
     let sendTask: void | Promise<void>;
@@ -516,10 +543,7 @@ export abstract class BaseComposerRuntimeCore
               ),
           );
 
-    this._notifyEventSubscribers("send", {
-      chars: draft.text.length,
-      attachments: attachments.length,
-    });
+    if (!this.reportsSendBeforeHandOff) reportSend();
 
     if (!isSubmission) return;
     // A queued message has its own place in the UI.

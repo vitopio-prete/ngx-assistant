@@ -23,6 +23,12 @@ export class DefaultEditComposerRuntimeCore extends BaseComposerRuntimeCore {
     return false;
   }
 
+  // Appending the edit starts a new branch and ends the edit, which drops the
+  // listeners bound through the edited message, so the send is reported first.
+  protected override get reportsSendBeforeHandOff() {
+    return true;
+  }
+
   protected override get cleanupOwner(): BaseComposerRuntimeCore {
     return this.runtime.composer instanceof BaseComposerRuntimeCore
       ? this.runtime.composer

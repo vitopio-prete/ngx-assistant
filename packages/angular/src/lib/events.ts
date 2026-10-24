@@ -52,9 +52,9 @@ export interface NxaEvents {
     approved: boolean;
   };
   /**
-   * A composer sent a message. The send that ends an edit is not reported, since the edit
-   * composer closes before the runtime reports it, and neither is `thread.append(...)`, which
-   * does not go through a composer.
+   * A composer sent a message. For the send that ends an edit, `messageId` is the edited message,
+   * which the new branch has replaced by the time the callback runs.
+   * `thread.append(...)` is not reported, since it does not go through a composer.
    */
   'composer.send': { threadId: string; messageId?: string; chars: number; attachments: number };
   /** An attachment was added to a composer. `messageId` is set for the edit composer of a message. */
