@@ -119,6 +119,58 @@ can write signals. Errors, thrown or rejected, go to Angular's `ErrorHandler`.
 - `thread.initialize` also reaches a subscription that starts on, or follows the selection to, a
   thread that is already initialized, once.
 
+## Composer primitives
+
+Headless directives for the composer: they bring behavior and state attributes, no styles.
+They work on the nearest composer, so the same markup is the thread composer at the top level and
+a message's edit composer inside a message scope.
+
+```ts
+import {
+  NxaComposerCancel,
+  NxaComposerInput,
+  NxaComposerRoot,
+  NxaComposerSend,
+} from '@ngx-assistant/angular';
+```
+
+```html
+<form nxaComposerRoot>
+  <textarea nxaComposerInput aria-label="Message" [autoFocus]="true"></textarea>
+  <button nxaComposerSend>Send</button>
+  <button nxaComposerCancel>Stop</button>
+</form>
+```
+
+| Directive                    | Behavior                                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `[nxaComposerRoot]`          | Submitting sends the composer; a primary mousedown on blank space focuses the input. Sets `data-nxa-composer-type`. |
+| `textarea[nxaComposerInput]` | Bound to the composer text. Enter sends, Escape cancels, pasted files become attachments. Disabled with the thread. |
+| `button[nxaComposerSend]`    | Sends. Disabled while the composer cannot send, or during a run when the runtime does not queue.                    |
+| `button[nxaComposerCancel]`  | Stops the run of a thread composer, ends the edit of an edit composer. Disabled while there is nothing to cancel.   |
+
+`nxaComposerInput` options:
+
+- `submitMode`: `'enter'` (default; Shift+Enter inserts a newline), `'ctrlEnter'` (Ctrl/Cmd+Enter
+  sends, Enter inserts a newline) or `'none'`. An Enter that cannot send inserts a newline, and keys
+  that belong to an IME composition never send. With the `queue` capability, Ctrl/Cmd+Shift+Enter
+  sends the draft ahead of the queue.
+- `cancelOnEscape` (default `true`), `addAttachmentOnPaste` (default `true`).
+- `autoFocus`: takes the focus when the input appears. With it, `focusOnRunStart` and
+  `focusOnThreadSwitched` (both default `true`) bring the focus back when the thread composer starts
+  a run, unless the focus is elsewhere on the page, and when the thread list switches threads.
+- `disabled` adds to the composer state; `nxaComposerSend` and `nxaComposerCancel` take it too.
+
+The primitives listen on their own element, before the listeners of your template on the same
+element. To veto one, call `event.preventDefault()` in a capture-phase listener, for example on an
+ancestor with `addEventListener('keydown', veto, { capture: true })`. The root always sends on
+submit, so Angular forms (`NgForm`, `[formGroup]`), which prevent the default submit, can sit on the
+same `<form>`.
+
+Ending an edit from the keyboard, with Escape or a keyboard activation of the cancel button, moves
+the focus to the thread composer of the same thread root (an element with `data-nxa-thread-root`),
+unless a handler moved it elsewhere.
+
 ## Build and test
 
 ```bash
