@@ -61,11 +61,13 @@ Each runtime lives in a scope of the injector tree, and `inject*()` returns the 
 | `injectThread()`     | `NXA_THREAD`     | a runtime provider                                         |
 | `injectComposer()`   | `NXA_COMPOSER`   | the runtime (thread composer) or a message                 |
 | `injectMessage()`    | `NXA_MESSAGE`    | `provideMessageScope(() => message)`                       |
+| `injectMessageUi()`  | `NXA_MESSAGE_UI` | `provideMessageScope(() => message)`                       |
 | `injectPart()`       | `NXA_PART`       | `providePartScope(() => part)`                             |
 | `injectAttachment()` | `NXA_ATTACHMENT` | `provideAttachmentScope(() => attachment)`                 |
 
 Inside a message scope `injectComposer()` returns the message's edit composer; the thread composer
-stays reachable as `injectThread().composer`. A missing scope throws, unless you pass
+stays reachable as `injectThread().composer`. `injectMessageUi()` holds the view state of the message
+that the runtime does not keep, as writable signals: `isHovering` and `isCopied`. A missing scope throws, unless you pass
 `{ optional: true }` to get `null`. A nested runtime provider isolates its subtree from the outer
 scopes.
 
@@ -222,6 +224,60 @@ exported as `nxaThreadViewport`, with `isAtBottom()`, `scrollToBottom(behavior?)
 
 `nxaScrollToBottom` takes `behavior` (default `'auto'`) and `disabled`, and can be vetoed like the
 composer buttons.
+
+## Message primitives
+
+Headless directives for the messages of a thread and their content.
+
+```ts
+import {
+  NxaMessageIf,
+  NxaMessageParts,
+  NxaMessageRoot,
+  NxaMessages,
+  NxaThreadEmpty,
+  NxaThreadIf,
+} from '@ngx-assistant/angular';
+```
+
+```html
+<p *nxaThreadEmpty>How can I help?</p>
+
+<article *nxaMessages="let message" nxaMessageRoot [class.mine]="message().role === 'user'">
+  <ng-container *nxaMessageParts="let part">
+    @let p = part(); @switch (p.type) { @case ('text') {
+    <p>{{ p.text }}</p>
+    } @case ('tool-call') {
+    <app-tool-call />
+    } }
+  </ng-container>
+  <div *nxaMessageIf="{ assistant: true, lastOrHover: true }">...</div>
+</article>
+```
+
+| Directive          | Behavior                                                                                                  |
+| ------------------ | --------------------------------------------------------------------------------------------------------- |
+| `*nxaMessages`     | One row per message of the thread, each a message scope. Rows follow the message id.                      |
+| `*nxaMessageParts` | One row per content part of the nearest message, each a part scope. Tool calls follow their `toolCallId`. |
+| `[nxaMessageRoot]` | Sets `data-nxa-message-id`, used by the thread viewport, and tracks the hover.                            |
+| `*nxaMessageIf`    | Renders while the message meets every condition given, the `else` template otherwise.                     |
+| `*nxaThreadIf`     | The same for the thread: `empty`, `running`, `disabled`.                                                  |
+| `*nxaThreadEmpty`  | Renders while the thread has no messages and is not loading them.                                         |
+
+Both lists give `let x` as a `Signal` of the row's state, plus `index`, `count`, `first` and `last`.
+Inside a row of `*nxaMessages`, `injectMessage()` is the row's message and `injectComposer()` its
+edit composer; inside a row of `*nxaMessageParts`, `injectPart()` is the row's part, with its
+`status`. A row keeps its view, and the state of the components in it, while its message stays in
+the thread, wherever it moves; a new message id creates a new row. In a message, a tool call whose
+`toolCallId` is unique keeps its row when the parts are reordered, and any other part keeps its row
+while the part at its position keeps its type. Read the signal into a variable (`@let p = part()`)
+so that `@switch` narrows the part type.
+
+`*nxaMessageIf` conditions, each checked only when given: `user`, `assistant`, `system`, `last`,
+`copied`, `speaking`, `hasAttachments`, `hasContent` (`true` or `false`); `hasBranches` and
+`lastOrHover` (`true`); `submittedFeedback` (`'positive'`, `'negative'` or `null`). With no
+condition it always renders. The hover and copied state belong to the message scope, so a nested
+`provideMessageScope(...)` starts with its own.
 
 ## Build and test
 

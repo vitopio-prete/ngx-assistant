@@ -1,4 +1,4 @@
-import { InjectionToken, Provider, inject } from '@angular/core';
+import { InjectionToken, Provider, WritableSignal, inject, signal } from '@angular/core';
 import type {
   AssistantRuntime,
   AttachmentRuntime,
@@ -19,6 +19,19 @@ export const NXA_MESSAGE = new InjectionToken<MessageRuntime | null>('NXA_MESSAG
 export const NXA_PART = new InjectionToken<MessagePartRuntime | null>('NXA_PART');
 export const NXA_ATTACHMENT = new InjectionToken<AttachmentRuntime | null>('NXA_ATTACHMENT');
 
+/**
+ * View state of one message that the engine does not keep: hover and copy feedback. It belongs to
+ * the message scope that provides it, so a nested scope for the same message starts afresh.
+ */
+export interface MessageUiState {
+  /** Whether the pointer is over the message root. */
+  readonly isHovering: WritableSignal<boolean>;
+  /** Whether the message was just copied, for copy feedback. */
+  readonly isCopied: WritableSignal<boolean>;
+}
+
+export const NXA_MESSAGE_UI = new InjectionToken<MessageUiState | null>('NXA_MESSAGE_UI');
+
 const cleared = (...tokens: InjectionToken<unknown>[]): Provider[] =>
   tokens.map((provide) => ({ provide, useValue: null }));
 
@@ -31,17 +44,22 @@ export function provideAssistantScope(factory: () => AssistantRuntime): Provider
     { provide: NXA_ASSISTANT, useFactory: factory },
     { provide: NXA_THREAD, useFactory: () => inject(NXA_ASSISTANT)!.thread },
     { provide: NXA_COMPOSER, useFactory: () => inject(NXA_THREAD)!.composer },
-    ...cleared(NXA_MESSAGE, NXA_PART, NXA_ATTACHMENT),
+    ...cleared(NXA_MESSAGE, NXA_MESSAGE_UI, NXA_PART, NXA_ATTACHMENT),
   ];
 }
 
 /**
  * Provides a message scope. Inside it, `NXA_COMPOSER` is the message's edit composer;
- * the thread composer stays reachable as `injectThread().composer`.
+ * the thread composer stays reachable as `injectThread().composer`. Each scope has its own
+ * `NXA_MESSAGE_UI` state.
  */
 export function provideMessageScope(factory: () => MessageRuntime): Provider[] {
   return [
     { provide: NXA_MESSAGE, useFactory: factory },
+    {
+      provide: NXA_MESSAGE_UI,
+      useFactory: (): MessageUiState => ({ isHovering: signal(false), isCopied: signal(false) }),
+    },
     { provide: NXA_COMPOSER, useFactory: () => inject(NXA_MESSAGE)!.composer },
     ...cleared(NXA_PART, NXA_ATTACHMENT),
   ];
@@ -120,6 +138,18 @@ export function injectMessage(options?: InjectScopeOptions & { optional?: false 
 export function injectMessage(options: InjectScopeOptions): MessageRuntime | null;
 export function injectMessage(options?: InjectScopeOptions) {
   return injectScope(NXA_MESSAGE, 'message', 'call it inside a message scope.', options);
+}
+
+/** The view state of the nearest message. */
+export function injectMessageUi(
+  options: InjectScopeOptions & { optional: true },
+): MessageUiState | null;
+export function injectMessageUi(
+  options?: InjectScopeOptions & { optional?: false },
+): MessageUiState;
+export function injectMessageUi(options: InjectScopeOptions): MessageUiState | null;
+export function injectMessageUi(options?: InjectScopeOptions) {
+  return injectScope(NXA_MESSAGE_UI, 'message', 'call it inside a message scope.', options);
 }
 
 /** The nearest message part runtime. */

@@ -17,6 +17,7 @@ import {
   injectAttachment,
   injectComposer,
   injectMessage,
+  injectMessageUi,
   injectPart,
   injectThread,
   provideAttachmentScope,
@@ -99,7 +100,15 @@ describe('scopes', () => {
       expect(injectThread()).toBe(thread);
       expect(injectAssistant()).toBe(parent.runInContext(() => injectAssistant()));
       expect(injectMessage().getState().id).toBe('m1');
+      expect(injectMessageUi().isHovering()).toBe(false);
+      expect(injectMessageUi()).toBe(injectMessageUi());
     });
+    expect(scope.runInContext(() => injectMessageUi())).not.toBe(
+      child(
+        parent,
+        provideMessageScope(() => thread.getMessageById('m1')),
+      ).runInContext(() => injectMessageUi()),
+    );
     parent.destroy();
   });
 
@@ -177,6 +186,7 @@ describe('scopes', () => {
       expect(injectThread().getState().messages).toEqual([]);
       expect(injectComposer()).toBe(injectThread().composer);
       expect(injectMessage({ optional: true })).toBeNull();
+      expect(injectMessageUi({ optional: true })).toBeNull();
     });
     expect(message.runInContext(() => injectMessage().getState().id)).toBe('m0');
     outer.destroy();
