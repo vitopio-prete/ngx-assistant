@@ -55,15 +55,18 @@ on until you stop it.
 
 Each runtime lives in a scope of the injector tree, and `inject*()` returns the nearest one:
 
-| Function             | Token            | Provided by                                                |
-| -------------------- | ---------------- | ---------------------------------------------------------- |
-| `injectAssistant()`  | `NXA_ASSISTANT`  | a runtime provider, `provideAssistantScope(() => runtime)` |
-| `injectThread()`     | `NXA_THREAD`     | a runtime provider                                         |
-| `injectComposer()`   | `NXA_COMPOSER`   | the runtime (thread composer) or a message                 |
-| `injectMessage()`    | `NXA_MESSAGE`    | `provideMessageScope(() => message)`                       |
-| `injectMessageUi()`  | `NXA_MESSAGE_UI` | `provideMessageScope(() => message)`                       |
-| `injectPart()`       | `NXA_PART`       | `providePartScope(() => part)`                             |
-| `injectAttachment()` | `NXA_ATTACHMENT` | `provideAttachmentScope(() => attachment)`                 |
+| Function                 | Token                  | Provided by                                                |
+| ------------------------ | ---------------------- | ---------------------------------------------------------- |
+| `injectAssistant()`      | `NXA_ASSISTANT`        | a runtime provider, `provideAssistantScope(() => runtime)` |
+| `injectThread()`         | `NXA_THREAD`           | a runtime provider                                         |
+| `injectComposer()`       | `NXA_COMPOSER`         | the runtime (thread composer) or a message                 |
+| `injectMessage()`        | `NXA_MESSAGE`          | `provideMessageScope(() => message)`                       |
+| `injectMessageUi()`      | `NXA_MESSAGE_UI`       | `provideMessageScope(() => message)`                       |
+| `injectPart()`           | `NXA_PART`             | `providePartScope(() => part)`                             |
+| `injectAttachment()`     | `NXA_ATTACHMENT`       | `provideAttachmentScope(() => attachment)`                 |
+| `injectThreadList()`     | `NXA_THREAD_LIST`      | a runtime provider                                         |
+| `injectThreadListItem()` | `NXA_THREAD_LIST_ITEM` | `provideThreadListItemScope(() => item)`                   |
+| `injectSuggestion()`     | `NXA_SUGGESTION`       | `provideSuggestionScope(() => suggestion)`                 |
 
 Inside a message scope `injectComposer()` returns the message's edit composer; the thread composer
 stays reachable as `injectThread().composer`. `injectMessageUi()` holds the view state of the message
@@ -427,6 +430,100 @@ reason `error`), and goes away when the message runs again. `let error` is a `Si
 a string error as is, the `message` of an error object, any other value as is, or
 `'An error occurred'` when the runtime gave none (`getMessageErrorText(message)` computes the same).
 `[nxaErrorRoot]` adds `role="alert"`, unless the element sets its own `role`.
+
+## Thread list primitives
+
+Headless directives for the list of threads: switching, creating, archiving and deleting them.
+
+```ts
+import {
+  NxaThreadListItemArchive,
+  NxaThreadListItemDelete,
+  NxaThreadListItemRoot,
+  NxaThreadListItems,
+  NxaThreadListItemTitle,
+  NxaThreadListItemTrigger,
+  NxaThreadListItemUnarchive,
+  NxaThreadListLoadMore,
+  NxaThreadListNew,
+  NxaThreadListRoot,
+} from '@ngx-assistant/angular';
+```
+
+```html
+<nav nxaThreadListRoot>
+  <button nxaThreadListNew>New chat</button>
+  <div *nxaThreadListItems="let thread" nxaThreadListItemRoot>
+    <button nxaThreadListItemTrigger>
+      <span nxaThreadListItemTitle fallback="New chat"></span>
+    </button>
+    <button nxaThreadListItemArchive>Archive</button>
+    <button nxaThreadListItemDelete>Delete</button>
+  </div>
+  <button nxaThreadListLoadMore>Load more</button>
+
+  <div *nxaThreadListItems="let thread; archived: true" nxaThreadListItemRoot>
+    <span nxaThreadListItemTitle></span>
+    <button nxaThreadListItemUnarchive>Restore</button>
+  </div>
+</nav>
+```
+
+| Directive                            | Behavior                                                                                                                        |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `[nxaThreadListRoot]`                | Collects the item triggers inside it for the arrow keys.                                                                        |
+| `button[nxaThreadListNew]`           | Switches to a new thread; `data-active` and `aria-current` while the new thread is the main one.                                |
+| `button[nxaThreadListLoadMore]`      | Loads more threads; disabled while there are none or a load is in flight.                                                       |
+| `*nxaThreadListItems`                | One row per thread, or per archived thread with `archived: true`, each a thread list item scope.                                |
+| `[nxaThreadListItemRoot]`            | `data-active` and `aria-current` on the main thread; ArrowDown and ArrowUp on its trigger move to the next or previous trigger. |
+| `button[nxaThreadListItemTrigger]`   | Switches to the row's thread; `data-active` and `aria-current` while it is the main one.                                        |
+| `[nxaThreadListItemTitle]`           | The thread title as text, or `fallback` while it has none. Exported as `nxaThreadListItemTitle`, with `title()`.                |
+| `button[nxaThreadListItemArchive]`   | Archives the row's thread.                                                                                                      |
+| `button[nxaThreadListItemUnarchive]` | Restores the row's archived thread; disabled while the thread list cannot restore threads.                                      |
+| `button[nxaThreadListItemDelete]`    | Deletes the row's thread.                                                                                                       |
+
+The list gives `let thread` as a `Signal` of the thread list item state, plus `index`, `count`,
+`first` and `last`. A row follows its thread by id: archiving, deleting or adding another thread
+keeps the row and the state of the components in it. The arrow keys follow the document order,
+skip disabled triggers, do not wrap and leave keys with a modifier alone; a `keydown` listener on the trigger can veto
+the move. A failed action is reported with `console.error`. The runtime decides which threads
+exist: `provideExternalStoreRuntime` lists those of its `adapters.threadList`, while
+`provideLocalRuntime` keeps a single thread and lists none.
+
+## Suggestion primitives
+
+```ts
+import {
+  NxaSuggestionDescription,
+  NxaSuggestions,
+  NxaSuggestionTitle,
+  NxaSuggestionTrigger,
+  provideSuggestions,
+} from '@ngx-assistant/angular';
+```
+
+```html
+<button *nxaSuggestions="let suggestion" nxaSuggestionTrigger send>
+  <span nxaSuggestionTitle></span>
+  <span nxaSuggestionDescription></span>
+</button>
+```
+
+`*nxaSuggestions` renders the suggestions of the nearest thread, which come from the runtime (an
+external store's `suggestions`, or a suggestion adapter); a suggestion without a title shows its
+prompt. `provideSuggestions([...])` replaces them with a fixed list, or a `Signal` of one: a string
+is a prompt that is also the title, an object gives `title`, `label` and `prompt`. Rows are keyed
+by content, so a suggestion keeps its row when another one goes away. Provided suggestions belong
+to the runtime of their injector: a runtime provided further down shows its own thread's
+suggestions.
+
+`nxaSuggestionTrigger` takes `send` and `clearComposer` (default `true`). With `send`, the prompt
+is appended as a user message with the composer's run config and the composer is cleared; while a
+run is in flight the message is queued if the runtime queues (the draft is kept), and otherwise
+the button is disabled, as it is while sending is disabled or a voice session does not take typed
+text. Without `send`, the prompt replaces the composer text, or is added after it with
+`clearComposer` off. The button is disabled while the thread is disabled, takes `disabled`, and
+can be vetoed like the composer buttons.
 
 ## Build and test
 
