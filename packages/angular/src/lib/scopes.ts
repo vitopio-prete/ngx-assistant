@@ -5,6 +5,8 @@ import type {
   ComposerRuntime,
   MessagePartRuntime,
   MessageRuntime,
+  ThreadListItemRuntime,
+  ThreadListRuntime,
   ThreadRuntime,
 } from '@ngx-assistant/engine';
 
@@ -18,6 +20,25 @@ export const NXA_COMPOSER = new InjectionToken<ComposerRuntime | null>('NXA_COMP
 export const NXA_MESSAGE = new InjectionToken<MessageRuntime | null>('NXA_MESSAGE');
 export const NXA_PART = new InjectionToken<MessagePartRuntime | null>('NXA_PART');
 export const NXA_ATTACHMENT = new InjectionToken<AttachmentRuntime | null>('NXA_ATTACHMENT');
+export const NXA_THREAD_LIST = new InjectionToken<ThreadListRuntime | null>('NXA_THREAD_LIST');
+export const NXA_THREAD_LIST_ITEM = new InjectionToken<ThreadListItemRuntime | null>(
+  'NXA_THREAD_LIST_ITEM',
+);
+
+/** One suggestion: what it shows (`title`, `label`) and the text it sends or inserts (`prompt`). */
+export interface SuggestionState {
+  readonly title: string;
+  readonly label: string;
+  readonly prompt: string;
+}
+
+/** The scope of one suggestion row. A row keeps its suggestion: rows are keyed by its content. */
+export interface SuggestionRuntime {
+  getState(): SuggestionState;
+  subscribe(callback: () => void): () => void;
+}
+
+export const NXA_SUGGESTION = new InjectionToken<SuggestionRuntime | null>('NXA_SUGGESTION');
 
 /**
  * View state of one message that the engine does not keep: hover and copy feedback. It belongs to
@@ -36,15 +57,24 @@ const cleared = (...tokens: InjectionToken<unknown>[]): Provider[] =>
   tokens.map((provide) => ({ provide, useValue: null }));
 
 /**
- * Provides an assistant scope: `NXA_ASSISTANT`, its main thread and the thread composer.
- * A nested assistant scope isolates its subtree from the outer one, message scopes included.
+ * Provides an assistant scope: `NXA_ASSISTANT`, its thread list, its main thread and the thread
+ * composer. A nested assistant scope isolates its subtree from the outer one, message, thread list
+ * item and suggestion scopes included.
  */
 export function provideAssistantScope(factory: () => AssistantRuntime): Provider[] {
   return [
     { provide: NXA_ASSISTANT, useFactory: factory },
+    { provide: NXA_THREAD_LIST, useFactory: () => inject(NXA_ASSISTANT)!.threads },
     { provide: NXA_THREAD, useFactory: () => inject(NXA_ASSISTANT)!.thread },
     { provide: NXA_COMPOSER, useFactory: () => inject(NXA_THREAD)!.composer },
-    ...cleared(NXA_MESSAGE, NXA_MESSAGE_UI, NXA_PART, NXA_ATTACHMENT),
+    ...cleared(
+      NXA_MESSAGE,
+      NXA_MESSAGE_UI,
+      NXA_PART,
+      NXA_ATTACHMENT,
+      NXA_THREAD_LIST_ITEM,
+      NXA_SUGGESTION,
+    ),
   ];
 }
 
@@ -73,6 +103,16 @@ export function providePartScope(factory: () => MessagePartRuntime): Provider[] 
 /** Provides an attachment scope, under a composer or a message scope. */
 export function provideAttachmentScope(factory: () => AttachmentRuntime): Provider[] {
   return [{ provide: NXA_ATTACHMENT, useFactory: factory }];
+}
+
+/** Provides a thread list item scope, under an assistant scope. */
+export function provideThreadListItemScope(factory: () => ThreadListItemRuntime): Provider[] {
+  return [{ provide: NXA_THREAD_LIST_ITEM, useFactory: factory }];
+}
+
+/** Provides a suggestion scope, under an assistant scope. */
+export function provideSuggestionScope(factory: () => SuggestionRuntime): Provider[] {
+  return [{ provide: NXA_SUGGESTION, useFactory: factory }];
 }
 
 export interface InjectScopeOptions {
@@ -172,4 +212,45 @@ export function injectAttachment(
 export function injectAttachment(options: InjectScopeOptions): AttachmentRuntime | null;
 export function injectAttachment(options?: InjectScopeOptions) {
   return injectScope(NXA_ATTACHMENT, 'attachment', 'call it inside an attachment scope.', options);
+}
+
+/** The thread list of the nearest assistant. */
+export function injectThreadList(
+  options: InjectScopeOptions & { optional: true },
+): ThreadListRuntime | null;
+export function injectThreadList(
+  options?: InjectScopeOptions & { optional?: false },
+): ThreadListRuntime;
+export function injectThreadList(options: InjectScopeOptions): ThreadListRuntime | null;
+export function injectThreadList(options?: InjectScopeOptions) {
+  return injectScope(NXA_THREAD_LIST, 'thread list', ASSISTANT_HINT, options);
+}
+
+/** The nearest thread list item runtime. */
+export function injectThreadListItem(
+  options: InjectScopeOptions & { optional: true },
+): ThreadListItemRuntime | null;
+export function injectThreadListItem(
+  options?: InjectScopeOptions & { optional?: false },
+): ThreadListItemRuntime;
+export function injectThreadListItem(options: InjectScopeOptions): ThreadListItemRuntime | null;
+export function injectThreadListItem(options?: InjectScopeOptions) {
+  return injectScope(
+    NXA_THREAD_LIST_ITEM,
+    'thread list item',
+    'call it inside a thread list item scope.',
+    options,
+  );
+}
+
+/** The nearest suggestion. */
+export function injectSuggestion(
+  options: InjectScopeOptions & { optional: true },
+): SuggestionRuntime | null;
+export function injectSuggestion(
+  options?: InjectScopeOptions & { optional?: false },
+): SuggestionRuntime;
+export function injectSuggestion(options: InjectScopeOptions): SuggestionRuntime | null;
+export function injectSuggestion(options?: InjectScopeOptions) {
+  return injectScope(NXA_SUGGESTION, 'suggestion', 'call it inside a suggestion scope.', options);
 }
