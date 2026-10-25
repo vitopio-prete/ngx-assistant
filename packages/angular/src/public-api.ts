@@ -13,3 +13,4 @@ export * from './lib/thread';
 export * from './lib/messages';
 export * from './lib/actions';
 export * from './lib/attachments';
+export * from './lib/error';
