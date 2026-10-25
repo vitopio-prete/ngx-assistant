@@ -12,3 +12,4 @@ export * from './lib/composer';
 export * from './lib/thread';
 export * from './lib/messages';
 export * from './lib/actions';
+export * from './lib/attachments';
