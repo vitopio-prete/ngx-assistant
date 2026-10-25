@@ -150,6 +150,7 @@ import {
 | `textarea[nxaComposerInput]` | Bound to the composer text. Enter sends, Escape cancels, pasted files become attachments. Disabled with the thread. |
 | `button[nxaComposerSend]`    | Sends. Disabled while the composer cannot send, or during a run when the runtime does not queue.                    |
 | `button[nxaComposerCancel]`  | Stops the run of a thread composer, ends the edit of an edit composer. Disabled while there is nothing to cancel.   |
+| `*nxaComposerIf`             | Renders while the composer meets every condition given (`editing`, `dictation`), the `else` template otherwise.     |
 
 `nxaComposerInput` options:
 
@@ -278,6 +279,78 @@ so that `@switch` narrows the part type.
 `lastOrHover` (`true`); `submittedFeedback` (`'positive'`, `'negative'` or `null`). With no
 condition it always renders. The hover and copied state belong to the message scope, so a nested
 `provideMessageScope(...)` starts with its own.
+
+## Action bar and branch picker
+
+Headless directives for the actions of a message and the navigation between its branches. They go
+inside a message scope, such as a row of `*nxaMessages`.
+
+```ts
+import {
+  NxaActionBarCopy,
+  NxaActionBarEdit,
+  NxaActionBarReload,
+  NxaActionBarRoot,
+  NxaBranchPickerCount,
+  NxaBranchPickerNext,
+  NxaBranchPickerNumber,
+  NxaBranchPickerPrevious,
+  NxaBranchPickerRoot,
+  NxaComposerIf,
+} from '@ngx-assistant/angular';
+```
+
+```html
+<article *nxaMessages="let message" nxaMessageRoot>
+  <form *nxaComposerIf="{ editing: true }; else view" nxaComposerRoot>
+    <textarea nxaComposerInput aria-label="Edit message"></textarea>
+    <button nxaComposerCancel>Cancel</button>
+    <button nxaComposerSend>Save</button>
+  </form>
+  <ng-template #view>...</ng-template>
+
+  <div nxaActionBarRoot autohide="not-last" autohideFloat="single-branch">
+    <button nxaActionBarCopy>Copy</button>
+    <button nxaActionBarEdit>Edit</button>
+    <button nxaActionBarReload>Regenerate</button>
+  </div>
+  <div nxaBranchPickerRoot hideWhenSingleBranch>
+    <button nxaBranchPickerPrevious aria-label="Previous">‹</button>
+    <span nxaBranchPickerNumber></span> / <span nxaBranchPickerCount></span>
+    <button nxaBranchPickerNext aria-label="Next">›</button>
+  </div>
+</article>
+```
+
+| Directive                         | Behavior                                                                                                     |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `[nxaActionBarRoot]`              | Hides (`hidden`) and floats (`data-nxa-floating`) by `autohide`, `autohideFloat` and `hideWhenRunning`.      |
+| `button[nxaActionBarCopy]`        | Copies the message text, or the edit draft while editing. Sets `data-nxa-copied` and the message's `copied`. |
+| `button[nxaActionBarEdit]`        | Starts editing the message. Disabled while editing, or when the thread is disabled or cannot edit.           |
+| `button[nxaActionBarReload]`      | Regenerates an assistant message as a new branch. Disabled during a run and for other messages.              |
+| `[nxaBranchPickerRoot]`           | With `hideWhenSingleBranch`, carries `hidden` while the message has one branch.                              |
+| `button[nxaBranchPickerPrevious]` | Shows the previous branch. Disabled on the first one, and during a run unless the runtime allows switching.  |
+| `button[nxaBranchPickerNext]`     | Shows the next branch, with the same rules.                                                                  |
+| `[nxaBranchPickerNumber]`         | Writes the 1-based number of the branch shown.                                                               |
+| `[nxaBranchPickerCount]`          | Writes the number of branches.                                                                               |
+
+`nxaActionBarRoot` options: `autohide` is `'never'` (default), `'always'` (hidden unless the pointer
+is over the message, as tracked by `nxaMessageRoot`) or `'not-last'` (the same, except on the last
+message); `autohideFloat` is `'never'` (default), `'always'` or `'single-branch'`, and floats a bar
+that the hover shows; `hideWhenRunning` hides the bar while the thread runs. Its status (`'hidden'`,
+`'floating'` or `'normal'`) is readable through `#bar="nxaActionBarRoot"` as `bar.status()`. The
+roots stay in the DOM when hidden; to remove them, wrap them in `*nxaMessageIf`. A `display` rule in
+your styles overrides `hidden`, so style the shown state with `:not([hidden])`.
+
+`nxaActionBarCopy` options: `copiedDuration` (default `3000` ms) and `copyToClipboard`, a function
+that writes the text (default `navigator.clipboard.writeText`). The write happens inside the click,
+so browsers that require a user gesture accept it. A failed write, or one that completes after the
+button is gone, leaves the message as it was. The copy is disabled while an assistant message is
+still running or the message has no text. The copied state belongs to the message, so copy buttons
+of the same message share it.
+
+Every button takes `disabled` on top of its own state, and a capture-phase listener can veto its
+click with `event.preventDefault()`.
 
 ## Build and test
 
