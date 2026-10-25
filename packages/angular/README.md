@@ -352,6 +352,82 @@ of the same message share it.
 Every button takes `disabled` on top of its own state, and a capture-phase listener can veto its
 click with `event.preventDefault()`.
 
+## Attachment primitives
+
+Headless directives for the attachments of a composer or a message, and for adding files.
+
+```ts
+import {
+  NxaAttachmentRemove,
+  NxaAttachmentRoot,
+  NxaAttachmentThumb,
+  NxaComposerAddAttachment,
+  NxaComposerAttachmentDropzone,
+  NxaComposerAttachments,
+  NxaMessageAttachments,
+} from '@ngx-assistant/angular';
+```
+
+```html
+<div nxaComposerAttachmentDropzone>
+  <form nxaComposerRoot>
+    <div *nxaComposerAttachments="let attachment" nxaAttachmentRoot>
+      <span nxaAttachmentThumb #thumb="nxaAttachmentThumb">{{ thumb.label() }}</span>
+      {{ attachment().name }}
+      <button nxaAttachmentRemove aria-label="Remove attachment">×</button>
+    </div>
+    <button nxaComposerAddAttachment aria-label="Add attachment">+</button>
+    <textarea nxaComposerInput></textarea>
+  </form>
+</div>
+
+<article *nxaMessages="let message">
+  <div *nxaMessageAttachments="let attachment" nxaAttachmentRoot>{{ attachment().name }}</div>
+</article>
+```
+
+| Directive                          | Behavior                                                                                                            |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `*nxaComposerAttachments`          | One row per attachment of the nearest composer (thread or edit), each an attachment scope.                          |
+| `*nxaMessageAttachments`           | One row per attachment of the nearest user message, each an attachment scope.                                       |
+| `[nxaAttachmentRoot]`              | Sets `data-nxa-attachment-type`, `data-nxa-attachment-status` and `data-nxa-attachment-source`.                     |
+| `[nxaAttachmentThumb]`             | Exported as `nxaAttachmentThumb`, with `label()`: the file extension (`.png`) or the type (`getAttachmentLabel()`). |
+| `button[nxaAttachmentRemove]`      | Removes the attachment from its composer. Disabled for the attachments of a message.                                |
+| `button[nxaComposerAddAttachment]` | Opens a file picker and adds the chosen files to the composer.                                                      |
+| `[nxaComposerAttachmentDropzone]`  | Adds dropped files to the composer; sets `data-nxa-dragging` while files are dragged over it.                       |
+
+Both lists give `let attachment` as a `Signal` of the attachment state, plus `index`, `count`,
+`first` and `last`, and inside a row `injectAttachment()` is the row's attachment. A row follows
+its attachment by id: removing or moving another attachment keeps the row and the state of the
+components in it. Attachments with the same id are bound to their position.
+
+`nxaComposerAddAttachment` takes `multiple` (default `true`) and `disabled`; the picker accepts the
+composer's `attachmentAccept`. It is disabled while the thread is disabled or the composer is not
+editing, and the chosen files go to the thread that opened the picker: if the main thread changes,
+even back to the same thread, or the button is destroyed or disabled first, nothing is added. A file the composer rejects does not stop the
+others; listen to `composer.attachmentAddError` with `injectNxaEvent()` to show it. The dropzone
+takes `disabled`, and it claims every file drag, even when disabled or when the runtime has no
+attachment adapter, so a dropped file never opens in the tab. The buttons can be vetoed like the
+composer buttons.
+
+## Error primitives
+
+```ts
+import { NxaErrorRoot, NxaMessageError } from '@ngx-assistant/angular';
+```
+
+```html
+<article *nxaMessages="let message">
+  <div *nxaMessageError="let error" nxaErrorRoot>{{ error() }}</div>
+</article>
+```
+
+`*nxaMessageError` renders while the nearest message ended with an error (status `incomplete`,
+reason `error`), and goes away when the message runs again. `let error` is a `Signal` of the error:
+a string error as is, the `message` of an error object, any other value as is, or
+`'An error occurred'` when the runtime gave none (`getMessageErrorText(message)` computes the same).
+`[nxaErrorRoot]` adds `role="alert"`, unless the element sets its own `role`.
+
 ## Build and test
 
 ```bash
