@@ -1,0 +1,178 @@
+import { describe, it, expect, vi } from "vitest";
+import { OptimisticState } from "../runtimes/remote-thread-list/optimistic-state";
+import { createCore, makeAdapter } from "./remote-thread-list-test-helpers";
+
+const archivedThread = (id: string) => ({
+  status: "archived" as const,
+  remoteId: id,
+  externalId: id,
+  title: "Archived",
+});
+
+describe("RemoteThreadListThreadListRuntimeCore.switchToThread unarchive option", () => {
+  it("opens an archived thread when the adapter omits unarchive", async () => {
+    const adapter = makeAdapter({
+      list: vi.fn(async () => ({ threads: [archivedThread("archived")] })),
+    });
+    delete adapter.unarchive;
+    const core = createCore(adapter);
+    await core.getLoadThreadsPromise();
+
+    expect(core.canUnarchive).toBe(false);
+
+    await expect(core.switchToThread("archived")).resolves.toBeUndefined();
+
+    expect(core.mainThreadId).toBe(core.getItemById("archived")?.id);
+    expect(core.getItemById("archived")?.status).toBe("archived");
+    expect(core.archivedThreadIds).toContain("archived");
+  });
+
+  it("rejects explicit unarchive without changing the archived status", async () => {
+    const adapter = makeAdapter({
+      list: vi.fn(async () => ({ threads: [archivedThread("archived")] })),
+    });
+    delete adapter.unarchive;
+    const core = createCore(adapter);
+    await core.getLoadThreadsPromise();
+    const optimisticUpdate = vi.spyOn(
+      OptimisticState.prototype,
+      "optimisticUpdate",
+    );
+
+    try {
+      await expect(core.unarchive("archived")).rejects.toThrow(
+        "Remote thread list adapter does not support unarchiving",
+      );
+
+      expect(optimisticUpdate).not.toHaveBeenCalled();
+      expect(core.getItemById("archived")?.status).toBe("archived");
+      expect(core.archivedThreadIds).toContain("archived");
+    } finally {
+      optimisticUpdate.mockRestore();
+    }
+  });
+
+  it("auto-unarchives by default", async () => {
+    const THREAD_ID = "archived-default";
+    const adapter = makeAdapter({
+      list: vi.fn(async () => ({ threads: [archivedThread(THREAD_ID)] })),
+    });
+
+    const core = createCore(adapter);
+    await core.getLoadThreadsPromise();
+
+    expect(core.canUnarchive).toBe(true);
+    expect(core.archivedThreadIds).toContain(THREAD_ID);
+    expect(core.threadIds).not.toContain(THREAD_ID);
+
+    await core.switchToThread(THREAD_ID);
+
+    expect(adapter.unarchive).toHaveBeenCalledWith(THREAD_ID);
+    expect(core.threadIds).toContain(THREAD_ID);
+    expect(core.archivedThreadIds).not.toContain(THREAD_ID);
+    expect(core.getItemById(THREAD_ID)?.status).toBe("regular");
+    expect(core.mainThreadId).toBe(core.getItemById(THREAD_ID)?.id);
+  });
+
+  it("auto-unarchives when unarchive is explicitly true", async () => {
+    const THREAD_ID = "archived-explicit-true";
+    const adapter = makeAdapter({
+      list: vi.fn(async () => ({ threads: [archivedThread(THREAD_ID)] })),
+    });
+
+    const core = createCore(adapter);
+    await core.getLoadThreadsPromise();
+    await core.switchToThread(THREAD_ID, { unarchive: true });
+
+    expect(adapter.unarchive).toHaveBeenCalledWith(THREAD_ID);
+    expect(core.threadIds).toContain(THREAD_ID);
+    expect(core.archivedThreadIds).not.toContain(THREAD_ID);
+    expect(core.getItemById(THREAD_ID)?.status).toBe("regular");
+  });
+
+  it("keeps the thread archived when unarchive: false", async () => {
+    const THREAD_ID = "archived-opt-out";
+    const adapter = makeAdapter({
+      list: vi.fn(async () => ({ threads: [archivedThread(THREAD_ID)] })),
+    });
+
+    const core = createCore(adapter);
+    await core.getLoadThreadsPromise();
+    await core.switchToThread(THREAD_ID, { unarchive: false });
+
+    expect(adapter.unarchive).not.toHaveBeenCalled();
+    expect(core.archivedThreadIds).toContain(THREAD_ID);
+    expect(core.threadIds).not.toContain(THREAD_ID);
+    expect(core.getItemById(THREAD_ID)?.status).toBe("archived");
+    expect(core.mainThreadId).toBe(core.getItemById(THREAD_ID)?.id);
+  });
+
+  it("stays on an archived thread opened with unarchive: false when another thread is archived or deleted", async () => {
+    const THREAD_ID = "archived-opened";
+    const adapter = makeAdapter({
+      list: vi.fn(async () => ({
+        threads: [
+          archivedThread(THREAD_ID),
+          { status: "regular" as const, remoteId: "b", externalId: "b" },
+          { status: "regular" as const, remoteId: "c", externalId: "c" },
+        ],
+      })),
+    });
+
+    const core = createCore(adapter);
+    await core.getLoadThreadsPromise();
+    await core.switchToThread(THREAD_ID, { unarchive: false });
+    await core.archive("b");
+    await core.delete("c");
+
+    expect(core.mainThreadId).toBe(core.getItemById(THREAD_ID)?.id);
+  });
+
+  it("restores an initialized draft's archived thread when unarchive fails", async () => {
+    const THREAD_ID = "archived-initialized-draft";
+    const error = new Error("unarchive failed");
+    const adapter = makeAdapter({
+      list: vi.fn(async () => ({ threads: [archivedThread(THREAD_ID)] })),
+      unarchive: vi.fn(async () => {
+        throw error;
+      }),
+    });
+
+    const core = createCore(adapter);
+    await core.getLoadThreadsPromise();
+    const draftId = core.newThreadId;
+    if (draftId === undefined) throw new Error("Expected seeded draft");
+    await core.initialize(draftId);
+    expect(core.newThreadId).toBeUndefined();
+    await core.switchToThread(THREAD_ID, { unarchive: false });
+
+    await expect(core.unarchive(THREAD_ID)).rejects.toBe(error);
+    expect(core.mainThreadId).not.toBe(THREAD_ID);
+    expect(core.getItemById(THREAD_ID)?.status).toBe("archived");
+    expect(core.archivedThreadIds).toContain(THREAD_ID);
+    expect(core.threadIds).not.toContain(THREAD_ID);
+  });
+
+  it("does not call unarchive when the target is already regular, regardless of option", async () => {
+    const THREAD_ID = "regular-target";
+    const adapter = makeAdapter({
+      list: vi.fn(async () => ({
+        threads: [
+          {
+            status: "regular" as const,
+            remoteId: THREAD_ID,
+            externalId: THREAD_ID,
+            title: "Regular",
+          },
+        ],
+      })),
+    });
+
+    const core = createCore(adapter);
+    await core.getLoadThreadsPromise();
+    await core.switchToThread(THREAD_ID, { unarchive: false });
+
+    expect(adapter.unarchive).not.toHaveBeenCalled();
+    expect(core.getItemById(THREAD_ID)?.status).toBe("regular");
+  });
+});

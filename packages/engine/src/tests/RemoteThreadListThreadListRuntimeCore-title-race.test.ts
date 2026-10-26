@@ -1,0 +1,702 @@
+import { describe, expect, it, vi } from "vitest";
+import { ReadonlyThreadRuntimeCore } from "../runtimes/readonly/ReadonlyThreadRuntimeCore";
+import {
+  getThreadData,
+  type RemoteThreadState,
+} from "../runtimes/remote-thread-list/remote-thread-state";
+import type {
+  RemoteThreadListAdapter,
+  RemoteThreadListResponse,
+} from "../runtimes/remote-thread-list/types";
+import {
+  createCore,
+  deferred,
+  makeAdapter,
+} from "./remote-thread-list-test-helpers";
+
+const mountDeletableThread = async () => {
+  const deleted = deferred<void>();
+  const adapter = makeAdapter({
+    list: vi.fn(async () => ({
+      threads: [
+        {
+          status: "regular" as const,
+          remoteId: "thread-1",
+          externalId: "thread-1",
+          title: "New chat",
+        },
+      ],
+    })),
+    delete: vi.fn(() => deleted.promise),
+  });
+  const core = createCore(adapter);
+  await core.getLoadThreadsPromise();
+  const internals = core as unknown as {
+    _instanceManager: { getThreadRuntimeCore: () => { messages: never[] } };
+    _state: { baseValue: RemoteThreadState };
+  };
+  internals._instanceManager.getThreadRuntimeCore = () => ({ messages: [] });
+  const isDeletionCommitted = () =>
+    getThreadData(internals._state.baseValue, "thread-1") === undefined;
+  return { adapter, core, deleted, isDeletionCommitted };
+};
+
+const openTitleStream = () => {
+  let controller!: ReadableStreamDefaultController;
+  const stream = new ReadableStream({
+    start(c) {
+      controller = c;
+      c.enqueue({ type: "part-start", path: [0], part: { type: "text" } });
+      c.enqueue({ type: "text-delta", path: [0], textDelta: "Generated" });
+    },
+  });
+  return { stream, close: () => controller.close() };
+};
+
+const initializeDraftDuringReplacement = async (
+  list: RemoteThreadListAdapter["list"],
+) => {
+  const core = createCore(makeAdapter());
+  await core.getLoadThreadsPromise();
+  const mounted = new ReadonlyThreadRuntimeCore();
+  (
+    core as unknown as {
+      _instanceManager: { getThreadRuntimeCore: () => unknown };
+    }
+  )._instanceManager.getThreadRuntimeCore = () => mounted;
+
+  const generatedTitle = openTitleStream();
+  const replacement = makeAdapter({
+    list,
+    generateTitle: vi.fn(async () => generatedTitle.stream as never),
+  });
+  core.__internal_setOptions({
+    adapter: replacement,
+    threadRuntime: () => ({ runtime: {} as never, dispose: () => {} }),
+  });
+  const load = core.getLoadThreadsPromise();
+  const threadId = core.mainThreadId!;
+  mounted.setMessages([
+    {
+      id: "first-message",
+      role: "user",
+      content: [{ type: "text", text: "hello" }],
+      attachments: [],
+      createdAt: new Date(0),
+      metadata: { custom: {} },
+    },
+  ]);
+  await core.initialize(threadId);
+  return { core, replacement, load, threadId, generatedTitle };
+};
+
+const microtasks = async (count: number) => {
+  for (let i = 0; i < count; i++) await Promise.resolve();
+};
+
+describe("RemoteThreadListThreadListRuntimeCore title generation", () => {
+  it("retains an automatic title when the runtime detaches before generation claims it", async () => {
+    const adapter = makeAdapter();
+    const core = createCore(adapter);
+    await core.getLoadThreadsPromise();
+    const threadId = core.mainThreadId!;
+    let mounted: ReadonlyThreadRuntimeCore | undefined =
+      new ReadonlyThreadRuntimeCore();
+    const manager = (
+      core as unknown as {
+        _instanceManager: {
+          getThreadRuntimeCore: () => ReadonlyThreadRuntimeCore | undefined;
+          _notifySubscribers: () => void;
+        };
+      }
+    )._instanceManager;
+    manager.getThreadRuntimeCore = () => mounted;
+    await core.initialize(threadId);
+
+    mounted.setMessages([
+      {
+        id: "first-message",
+        role: "user",
+        content: [{ type: "text", text: "hello" }],
+        attachments: [],
+        createdAt: new Date(0),
+        metadata: { custom: {} },
+      },
+    ]);
+    mounted = undefined;
+    manager._notifySubscribers();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(adapter.generateTitle).not.toHaveBeenCalled();
+
+    mounted = new ReadonlyThreadRuntimeCore();
+    mounted.isLoading = true;
+    manager._notifySubscribers();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(adapter.generateTitle).not.toHaveBeenCalled();
+
+    mounted.isLoading = false;
+    mounted.setMessages([]);
+    await vi.waitFor(() =>
+      expect(adapter.generateTitle).toHaveBeenCalledOnce(),
+    );
+    expect(adapter.generateTitle).toHaveBeenCalledWith(threadId, [
+      expect.objectContaining({
+        id: "first-message",
+        content: [{ type: "text", text: "hello" }],
+      }),
+    ]);
+    core.__internal_dispose();
+  });
+
+  it("waits for a replacement list before generating an automatic title", async () => {
+    const replacementList = deferred<RemoteThreadListResponse>();
+    const { core, replacement, load, threadId, generatedTitle } =
+      await initializeDraftDuringReplacement(() => replacementList.promise);
+    expect(replacement.generateTitle).not.toHaveBeenCalled();
+
+    replacementList.resolve({ threads: [] });
+    await load;
+    await vi.waitFor(() =>
+      expect(replacement.generateTitle).toHaveBeenCalledOnce(),
+    );
+    generatedTitle.close();
+    await vi.waitFor(() =>
+      expect(core.getItemById(threadId)?.title).toBe("Generated"),
+    );
+    core.__internal_dispose();
+  });
+
+  it("generates an automatic title when a reload lands the replacement list", async () => {
+    const { core, replacement, threadId, generatedTitle } =
+      await initializeDraftDuringReplacement(
+        vi
+          .fn<() => Promise<RemoteThreadListResponse>>()
+          .mockReturnValueOnce(new Promise<never>(() => {}))
+          .mockResolvedValueOnce({ threads: [] }),
+      );
+
+    await core.reload();
+    await vi.waitFor(() =>
+      expect(replacement.generateTitle).toHaveBeenCalledOnce(),
+    );
+    generatedTitle.close();
+    await vi.waitFor(() =>
+      expect(core.getItemById(threadId)?.title).toBe("Generated"),
+    );
+    core.__internal_dispose();
+  });
+
+  it("does not send a waiting automatic title to the next adapter when a subscriber throws during the swap", async () => {
+    const { core, replacement, threadId } =
+      await initializeDraftDuringReplacement(
+        () => new Promise<never>(() => {}),
+      );
+    const next = makeAdapter({
+      list: vi.fn(async () => ({
+        threads: [
+          {
+            status: "regular" as const,
+            remoteId: threadId,
+            externalId: threadId,
+            title: "Next adapter title",
+          },
+        ],
+      })),
+    });
+    const error = new Error("subscriber failed");
+    let fail = true;
+    core.subscribe(() => {
+      if (!fail) return;
+      fail = false;
+      throw error;
+    });
+
+    expect(() =>
+      core.__internal_setOptions({
+        adapter: next,
+        threadRuntime: () => ({ runtime: {} as never, dispose: () => {} }),
+      }),
+    ).toThrow(error);
+    await core.getLoadThreadsPromise();
+    expect(core.getItemById(threadId)?.title).toBe("Next adapter title");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(next.generateTitle).not.toHaveBeenCalled();
+    expect(replacement.generateTitle).not.toHaveBeenCalled();
+    core.__internal_dispose();
+  });
+
+  it("preserves an existing title when generation returns no title", async () => {
+    const adapter = makeAdapter({
+      list: vi.fn(async () => ({
+        threads: [
+          {
+            status: "regular" as const,
+            remoteId: "thread-1",
+            externalId: "thread-1",
+            title: "Existing title",
+          },
+        ],
+      })),
+    });
+    const core = createCore(adapter);
+    await core.getLoadThreadsPromise();
+
+    const internals = core as unknown as {
+      _instanceManager: { getThreadRuntimeCore: () => { messages: never[] } };
+    };
+    internals._instanceManager.getThreadRuntimeCore = () => ({ messages: [] });
+
+    await core.generateTitle("thread-1");
+
+    expect(adapter.generateTitle).toHaveBeenCalledOnce();
+    expect(core.getItemById("thread-1")?.title).toBe("Existing title");
+  });
+
+  it("keeps a manual rename made during automatic title generation", async () => {
+    const generatedTitle = deferred<ReadableStream>();
+    const adapter = makeAdapter({
+      list: vi.fn(async () => ({
+        threads: [
+          {
+            status: "regular" as const,
+            remoteId: "thread-1",
+            externalId: "thread-1",
+            title: "New chat",
+          },
+        ],
+      })),
+      generateTitle: vi.fn(async () => generatedTitle.promise as never),
+    });
+    const core = createCore(adapter);
+    await core.getLoadThreadsPromise();
+
+    const internals = core as unknown as {
+      _instanceManager: { getThreadRuntimeCore: () => { messages: never[] } };
+    };
+    internals._instanceManager.getThreadRuntimeCore = () => ({ messages: [] });
+
+    const generation = core.generateTitle("thread-1", { automatic: true });
+    await vi.waitFor(() => {
+      expect(adapter.generateTitle).toHaveBeenCalledOnce();
+    });
+    await core.rename("thread-1", "Manual title");
+
+    generatedTitle.resolve(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue({
+            type: "part-start",
+            path: [0],
+            part: { type: "text" },
+          });
+          controller.enqueue({
+            type: "text-delta",
+            path: [0],
+            textDelta: "Generated title",
+          });
+          controller.enqueue({ type: "part-finish", path: [0] });
+          controller.close();
+        },
+      }),
+    );
+    await generation;
+
+    expect(core.getItemById("thread-1")?.title).toBe("Manual title");
+    expect(adapter.rename).toHaveBeenNthCalledWith(
+      1,
+      "thread-1",
+      "Manual title",
+    );
+    expect(adapter.rename).toHaveBeenNthCalledWith(
+      2,
+      "thread-1",
+      "Manual title",
+    );
+  });
+
+  it("keeps a generated title when an earlier rename completes during another update", async () => {
+    const reloadRequest = deferred<{
+      threads: {
+        status: "regular";
+        remoteId: string;
+        externalId: string;
+        title: string;
+      }[];
+    }>();
+    const adapter = makeAdapter({
+      list: vi
+        .fn()
+        .mockResolvedValueOnce({
+          threads: [
+            {
+              status: "regular" as const,
+              remoteId: "thread-1",
+              externalId: "thread-1",
+              title: "New chat",
+            },
+          ],
+        })
+        .mockImplementationOnce(() => reloadRequest.promise),
+      generateTitle: vi.fn(
+        async () =>
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue({
+                type: "part-start",
+                path: [0],
+                part: { type: "text" },
+              });
+              controller.enqueue({
+                type: "text-delta",
+                path: [0],
+                textDelta: "Generated Title",
+              });
+              controller.enqueue({ type: "part-finish", path: [0] });
+              controller.close();
+            },
+          }) as never,
+      ),
+    });
+    const core = createCore(adapter);
+    await core.getLoadThreadsPromise();
+
+    const internals = core as unknown as {
+      _instanceManager: { getThreadRuntimeCore: () => { messages: never[] } };
+    };
+    internals._instanceManager.getThreadRuntimeCore = () => ({ messages: [] });
+
+    const overlappingUpdate = core.reload();
+
+    await core.rename("thread-1", "Instant name");
+    await core.generateTitle("thread-1");
+
+    expect(core.getItemById("thread-1")?.title).toBe("Generated Title");
+
+    reloadRequest.resolve({
+      threads: [
+        {
+          status: "regular",
+          remoteId: "thread-1",
+          externalId: "thread-1",
+          title: "New chat",
+        },
+      ],
+    });
+    await overlappingUpdate;
+
+    expect(core.getItemById("thread-1")?.title).toBe("Generated Title");
+  });
+
+  it("does not apply a generated title after the adapter changes", async () => {
+    const adapterA = makeAdapter({
+      list: vi.fn(async () => ({
+        threads: [
+          {
+            status: "regular" as const,
+            remoteId: "thread-1",
+            externalId: "thread-1",
+            title: "Adapter A title",
+          },
+        ],
+      })),
+      generateTitle: vi.fn(
+        async () =>
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue({
+                type: "part-start",
+                path: [0],
+                part: { type: "text" },
+              });
+              controller.enqueue({
+                type: "text-delta",
+                path: [0],
+                textDelta: "Generated by adapter A",
+              });
+              controller.enqueue({ type: "part-finish", path: [0] });
+              controller.close();
+            },
+          }) as never,
+      ),
+    });
+    const adapterB = makeAdapter({
+      list: vi.fn(async () => ({
+        threads: [
+          {
+            status: "regular" as const,
+            remoteId: "thread-1",
+            externalId: "thread-1",
+            title: "Adapter B title",
+          },
+        ],
+      })),
+    });
+    const core = createCore(adapterA);
+    await core.getLoadThreadsPromise();
+
+    const internals = core as unknown as {
+      _instanceManager: { getThreadRuntimeCore: () => { messages: never[] } };
+    };
+    internals._instanceManager.getThreadRuntimeCore = () => ({ messages: [] });
+
+    let replacementLoad: Promise<void> | undefined;
+    let adapterChanged = false;
+    const unsubscribe = core.subscribe(() => {
+      if (
+        adapterChanged ||
+        core.getItemById("thread-1")?.title !== "Generated by adapter A"
+      ) {
+        return;
+      }
+      adapterChanged = true;
+      core.__internal_setOptions({
+        adapter: adapterB,
+        threadRuntime: () => ({ runtime: {} as never, dispose: () => {} }),
+      });
+      replacementLoad = core.getLoadThreadsPromise();
+    });
+
+    await core.generateTitle("thread-1");
+    unsubscribe();
+    expect(adapterChanged).toBe(true);
+    await replacementLoad;
+
+    expect(core.getItemById("thread-1")?.title).toBe("Adapter B title");
+  });
+
+  it("stops title requests for a thread once its deletion completes", async () => {
+    const generatedTitle = deferred<ReadableStream>();
+    let stream!: ReadableStreamDefaultController;
+    const adapter = makeAdapter({
+      list: vi.fn(async () => ({
+        threads: [
+          {
+            status: "regular" as const,
+            remoteId: "thread-1",
+            externalId: "thread-1",
+            title: "New chat",
+          },
+        ],
+      })),
+      generateTitle: vi.fn(async () => generatedTitle.promise as never),
+    });
+    const core = createCore(adapter);
+    await core.getLoadThreadsPromise();
+
+    const internals = core as unknown as {
+      _instanceManager: { getThreadRuntimeCore: () => { messages: never[] } };
+    };
+    internals._instanceManager.getThreadRuntimeCore = () => ({ messages: [] });
+
+    const generation = core.generateTitle("thread-1", { automatic: true });
+    await vi.waitFor(() => {
+      expect(adapter.generateTitle).toHaveBeenCalledOnce();
+    });
+    generatedTitle.resolve(
+      new ReadableStream({
+        start(controller) {
+          stream = controller;
+          controller.enqueue({
+            type: "part-start",
+            path: [0],
+            part: { type: "text" },
+          });
+          controller.enqueue({
+            type: "text-delta",
+            path: [0],
+            textDelta: "Generated title",
+          });
+        },
+      }),
+    );
+    await core.rename("thread-1", "Manual title");
+    await core.delete("thread-1");
+
+    stream.close();
+    await generation;
+
+    expect(adapter.rename).toHaveBeenCalledOnce();
+  });
+
+  it("stops a deleted thread's title run after a reload lists the same id again", async () => {
+    const generatedTitle = deferred<ReadableStream>();
+    let stream!: ReadableStreamDefaultController;
+    const adapter = makeAdapter({
+      list: vi.fn(async () => ({
+        threads: [
+          {
+            status: "regular" as const,
+            remoteId: "thread-1",
+            externalId: "thread-1",
+            title: "New chat",
+          },
+        ],
+      })),
+      generateTitle: vi.fn(async () => generatedTitle.promise as never),
+    });
+    const core = createCore(adapter);
+    await core.getLoadThreadsPromise();
+
+    const internals = core as unknown as {
+      _instanceManager: { getThreadRuntimeCore: () => { messages: never[] } };
+    };
+    internals._instanceManager.getThreadRuntimeCore = () => ({ messages: [] });
+
+    const generation = core.generateTitle("thread-1", { automatic: true });
+    await vi.waitFor(() => {
+      expect(adapter.generateTitle).toHaveBeenCalledOnce();
+    });
+    generatedTitle.resolve(
+      new ReadableStream({
+        start(controller) {
+          stream = controller;
+          controller.enqueue({
+            type: "part-start",
+            path: [0],
+            part: { type: "text" },
+          });
+          controller.enqueue({
+            type: "text-delta",
+            path: [0],
+            textDelta: "Generated title",
+          });
+        },
+      }),
+    );
+    await core.rename("thread-1", "Manual title");
+    await core.delete("thread-1");
+    await core.reload();
+    expect(core.getItemById("thread-1")?.title).toBe("New chat");
+
+    stream.close();
+    await generation;
+
+    expect(adapter.rename).toHaveBeenCalledOnce();
+    expect(core.getItemById("thread-1")?.title).toBe("New chat");
+  });
+
+  // A deletion commits a few microtasks before its title state is cleared, so
+  // these settle the deletion at every offset across that window.
+  it("does not request a title between a deletion committing and its title state clearing", async () => {
+    const late: number[] = [];
+    for (let offset = 0; offset < 20; offset++) {
+      const { adapter, core, deleted, isDeletionCommitted } =
+        await mountDeletableThread();
+      const renamed = deferred<void>();
+      let renameSettled = false;
+      vi.mocked(adapter.rename).mockImplementation(async () => {
+        await renamed.promise;
+        renameSettled = true;
+      });
+      vi.mocked(adapter.delete).mockImplementation(() => {
+        expect(renameSettled).toBe(true);
+        return deleted.promise;
+      });
+      vi.mocked(adapter.generateTitle).mockImplementation(async () => {
+        if (isDeletionCommitted()) late.push(offset);
+        return new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }) as never;
+      });
+
+      const renaming = core.rename("thread-1", "Manual title");
+      const generation = core.generateTitle("thread-1");
+      const deleting = core.delete("thread-1");
+      expect(adapter.delete).not.toHaveBeenCalled();
+      renamed.resolve();
+      await vi.waitFor(
+        () => {
+          expect(adapter.delete).toHaveBeenCalledOnce();
+        },
+        { interval: 5 },
+      );
+      await microtasks(offset);
+      deleted.resolve();
+      await Promise.all([renaming, generation, deleting]);
+    }
+
+    expect(late).toEqual([]);
+  });
+
+  it("does not write a rename back between a deletion committing and its title state clearing", async () => {
+    const late: number[] = [];
+    for (let offset = 0; offset < 20; offset++) {
+      const { adapter, core, deleted, isDeletionCommitted } =
+        await mountDeletableThread();
+      const generatedTitle = openTitleStream();
+      vi.mocked(adapter.generateTitle).mockResolvedValue(
+        generatedTitle.stream as never,
+      );
+      vi.mocked(adapter.rename).mockImplementation(async () => {
+        if (isDeletionCommitted()) late.push(offset);
+      });
+
+      const generation = core.generateTitle("thread-1", { automatic: true });
+      await vi.waitFor(
+        () => {
+          expect(adapter.generateTitle).toHaveBeenCalledOnce();
+        },
+        { interval: 5 },
+      );
+      await core.rename("thread-1", "Manual title");
+      const deleting = core.delete("thread-1");
+      await vi.waitFor(
+        () => {
+          expect(adapter.delete).toHaveBeenCalledOnce();
+        },
+        { interval: 5 },
+      );
+      generatedTitle.close();
+      await microtasks(offset);
+      deleted.resolve();
+      await Promise.all([generation, deleting]);
+    }
+
+    expect(late).toEqual([]);
+  });
+
+  it("does not request a title for a thread deleted while the request waits on a rename", async () => {
+    const renamed = deferred<void>();
+    let renameSettled = false;
+    const adapter = makeAdapter({
+      list: vi.fn(async () => ({
+        threads: [
+          {
+            status: "regular" as const,
+            remoteId: "thread-1",
+            externalId: "thread-1",
+            title: "New chat",
+          },
+        ],
+      })),
+      rename: vi.fn(async () => {
+        await renamed.promise;
+        renameSettled = true;
+      }),
+      delete: vi.fn(async () => {
+        expect(renameSettled).toBe(true);
+      }),
+    });
+    const core = createCore(adapter);
+    await core.getLoadThreadsPromise();
+
+    const internals = core as unknown as {
+      _instanceManager: { getThreadRuntimeCore: () => { messages: never[] } };
+    };
+    internals._instanceManager.getThreadRuntimeCore = () => ({ messages: [] });
+
+    const renaming = core.rename("thread-1", "Manual title");
+    const generation = core.generateTitle("thread-1", { automatic: true });
+    const deleting = core.delete("thread-1");
+    expect(adapter.delete).not.toHaveBeenCalled();
+    renamed.resolve();
+    await Promise.all([renaming, generation, deleting]);
+
+    expect(adapter.generateTitle).not.toHaveBeenCalled();
+  });
+});
