@@ -14,3 +14,4 @@ export {
   type ToolUiComponent,
   type ToolUiDeclaration,
 } from './tool-ui-registry';
+export * from './approval';

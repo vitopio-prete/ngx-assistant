@@ -9,6 +9,7 @@ import type {
   ThreadListRuntime,
   ThreadRuntime,
 } from '@ngx-assistant/engine';
+import { NXA_TOOL_APPROVAL } from './tools/approval/approval-state';
 import { NXA_TOOL_CALL, createToolCall } from './tools/tool-call';
 import { TOOL_UI_REGISTRY_PROVIDER } from './tools/tool-ui-registry';
 
@@ -76,6 +77,7 @@ export function provideAssistantScope(factory: () => AssistantRuntime): Provider
       NXA_MESSAGE_UI,
       NXA_PART,
       NXA_TOOL_CALL,
+      NXA_TOOL_APPROVAL,
       NXA_ATTACHMENT,
       NXA_THREAD_LIST_ITEM,
       NXA_SUGGESTION,
@@ -96,7 +98,7 @@ export function provideMessageScope(factory: () => MessageRuntime): Provider[] {
       useFactory: (): MessageUiState => ({ isHovering: signal(false), isCopied: signal(false) }),
     },
     { provide: NXA_COMPOSER, useFactory: () => inject(NXA_MESSAGE)!.composer },
-    ...cleared(NXA_PART, NXA_TOOL_CALL, NXA_ATTACHMENT),
+    ...cleared(NXA_PART, NXA_TOOL_CALL, NXA_TOOL_APPROVAL, NXA_ATTACHMENT),
   ];
 }
 
@@ -111,7 +113,7 @@ export function providePartScope(factory: () => MessagePartRuntime): Provider[] 
       provide: NXA_TOOL_CALL,
       useFactory: () => createToolCall(inject(NXA_PART)!, inject(Injector)),
     },
-    ...cleared(NXA_ATTACHMENT),
+    ...cleared(NXA_TOOL_APPROVAL, NXA_ATTACHMENT),
   ];
 }
 
