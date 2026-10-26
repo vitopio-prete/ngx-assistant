@@ -19,10 +19,15 @@ import {
   injectMessage,
   injectMessageUi,
   injectPart,
+  injectSuggestion,
   injectThread,
+  injectThreadList,
+  injectThreadListItem,
   provideAttachmentScope,
   provideMessageScope,
   providePartScope,
+  provideSuggestionScope,
+  provideThreadListItemScope,
 } from './scopes';
 
 const MESSAGE_ID = new InjectionToken<string>('MESSAGE_ID');
@@ -212,6 +217,31 @@ describe('scopes', () => {
       providePartScope(() => thread.getMessageById('m0').getMessagePartByIndex(0)),
     );
     expect(part.runInContext(() => injectAttachment({ optional: true }))).toBeNull();
+    parent.destroy();
+  });
+
+  it('provides the thread list, and thread list item and suggestion scopes that a nested runtime clears', () => {
+    const parent = withRuntime();
+    const threads = parent.runInContext(() => injectThreadList());
+    expect(threads).toBe(parent.runInContext(() => injectAssistant().threads));
+    expect(parent.runInContext(() => injectThreadListItem({ optional: true }))).toBeNull();
+    expect(() => parent.runInContext(() => injectSuggestion())).toThrow(/No suggestion scope/);
+
+    const suggestion = { title: 't', label: '', prompt: 'p' };
+    const scoped = child(parent, [
+      ...provideThreadListItemScope(() => threads.mainItem),
+      ...provideSuggestionScope(() => ({
+        getState: () => suggestion,
+        subscribe: () => () => undefined,
+      })),
+    ]);
+    expect(scoped.runInContext(() => injectThreadListItem().getState().isMain)).toBe(true);
+    expect(scoped.runInContext(() => injectSuggestion().getState())).toBe(suggestion);
+
+    const nested = child(scoped, provideLocalRuntime(replyModel));
+    expect(nested.runInContext(() => injectThreadListItem({ optional: true }))).toBeNull();
+    expect(nested.runInContext(() => injectSuggestion({ optional: true }))).toBeNull();
+    expect(nested.runInContext(() => injectThreadList())).not.toBe(threads);
     parent.destroy();
   });
 
