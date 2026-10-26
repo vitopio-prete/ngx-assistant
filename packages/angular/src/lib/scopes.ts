@@ -1,4 +1,4 @@
-import { InjectionToken, Provider, WritableSignal, inject, signal } from '@angular/core';
+import { InjectionToken, Injector, Provider, WritableSignal, inject, signal } from '@angular/core';
 import type {
   AssistantRuntime,
   AttachmentRuntime,
@@ -9,6 +9,8 @@ import type {
   ThreadListRuntime,
   ThreadRuntime,
 } from '@ngx-assistant/engine';
+import { NXA_TOOL_CALL, createToolCall } from './tools/tool-call';
+import { TOOL_UI_REGISTRY_PROVIDER } from './tools/tool-ui-registry';
 
 // Each scope is a token in the injector tree. A scope provider sets its own token, derives the
 // tokens it implies (a message brings its edit composer) and clears the narrower ones, so a
@@ -57,9 +59,10 @@ const cleared = (...tokens: InjectionToken<unknown>[]): Provider[] =>
   tokens.map((provide) => ({ provide, useValue: null }));
 
 /**
- * Provides an assistant scope: `NXA_ASSISTANT`, its thread list, its main thread and the thread
- * composer. A nested assistant scope isolates its subtree from the outer one, message, thread list
- * item and suggestion scopes included.
+ * Provides an assistant scope: `NXA_ASSISTANT`, its thread list, its main thread, the thread
+ * composer and a tool UI registry. A nested assistant scope isolates its subtree from the outer
+ * one, message, thread list item and suggestion scopes included; its tool UI registry is chained to
+ * the one above, so the outer tool UIs still apply.
  */
 export function provideAssistantScope(factory: () => AssistantRuntime): Provider[] {
   return [
@@ -67,10 +70,12 @@ export function provideAssistantScope(factory: () => AssistantRuntime): Provider
     { provide: NXA_THREAD_LIST, useFactory: () => inject(NXA_ASSISTANT)!.threads },
     { provide: NXA_THREAD, useFactory: () => inject(NXA_ASSISTANT)!.thread },
     { provide: NXA_COMPOSER, useFactory: () => inject(NXA_THREAD)!.composer },
+    TOOL_UI_REGISTRY_PROVIDER,
     ...cleared(
       NXA_MESSAGE,
       NXA_MESSAGE_UI,
       NXA_PART,
+      NXA_TOOL_CALL,
       NXA_ATTACHMENT,
       NXA_THREAD_LIST_ITEM,
       NXA_SUGGESTION,
@@ -91,13 +96,23 @@ export function provideMessageScope(factory: () => MessageRuntime): Provider[] {
       useFactory: (): MessageUiState => ({ isHovering: signal(false), isCopied: signal(false) }),
     },
     { provide: NXA_COMPOSER, useFactory: () => inject(NXA_MESSAGE)!.composer },
-    ...cleared(NXA_PART, NXA_ATTACHMENT),
+    ...cleared(NXA_PART, NXA_TOOL_CALL, NXA_ATTACHMENT),
   ];
 }
 
-/** Provides a message part scope, under a message scope. */
+/**
+ * Provides a message part scope, under a message scope. A `tool-call` part also provides its
+ * `NXA_TOOL_CALL`, live for the lifetime of the scope.
+ */
 export function providePartScope(factory: () => MessagePartRuntime): Provider[] {
-  return [{ provide: NXA_PART, useFactory: factory }, ...cleared(NXA_ATTACHMENT)];
+  return [
+    { provide: NXA_PART, useFactory: factory },
+    {
+      provide: NXA_TOOL_CALL,
+      useFactory: () => createToolCall(inject(NXA_PART)!, inject(Injector)),
+    },
+    ...cleared(NXA_ATTACHMENT),
+  ];
 }
 
 /** Provides an attachment scope, under a composer or a message scope. */
