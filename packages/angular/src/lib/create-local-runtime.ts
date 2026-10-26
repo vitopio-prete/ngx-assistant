@@ -7,6 +7,7 @@ import {
   type LocalRuntimeOptionsBase,
   type ThreadMessageLike,
 } from '@ngx-assistant/engine';
+import { NXA_RUNTIME_ADAPTERS } from './runtime-adapters';
 
 export type LocalRuntimeOptions = Omit<LocalRuntimeOptionsBase, 'adapters'> & {
   /** Messages the thread starts with. A history adapter that loads messages replaces them. */
@@ -42,6 +43,9 @@ const endMediaSessions = ({ thread }: AssistantRuntime) => {
  * current injector. Shared by every provider built on the local runtime; not part of the public
  * API. Must run in an injection context.
  *
+ * Inside a thread of a remote thread list, the list's adapters (`NXA_RUNTIME_ADAPTERS`) are merged
+ * under the runtime's own and its model context is registered on the runtime.
+ *
  * Creating the runtime owns its lifecycle, which the runtime API does not expose: the main thread
  * core loads the history once and is detached when the injector is destroyed, after voice,
  * dictation and speech end.
@@ -51,14 +55,19 @@ export function createLocalAssistantRuntime(
   options: LocalRuntimeOptions,
 ): { runtime: AssistantRuntime; core: LocalRuntimeCore } {
   const { initialMessages, adapters, ...rest } = options;
+  const { modelContext, ...listAdapters } = inject(NXA_RUNTIME_ADAPTERS, { optional: true }) ?? {};
   const core = new LocalRuntimeCore(
-    { ...rest, adapters: { ...adapters, chatModel } },
+    { ...rest, adapters: { ...listAdapters, ...adapters, chatModel } },
     initialMessages,
   );
   const runtime = new AssistantRuntimeImpl(core);
+  const unregisterModelContext = modelContext
+    ? runtime.registerModelContextProvider(modelContext)
+    : undefined;
 
   const thread = core.threads.getMainThreadRuntimeCore();
   inject(DestroyRef).onDestroy(() => {
+    unregisterModelContext?.();
     endMediaSessions(runtime);
     thread.detach();
   });
