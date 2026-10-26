@@ -16,3 +16,4 @@ export * from './lib/attachments';
 export * from './lib/error';
 export * from './lib/thread-list';
 export * from './lib/suggestions';
+export * from './lib/data-stream';

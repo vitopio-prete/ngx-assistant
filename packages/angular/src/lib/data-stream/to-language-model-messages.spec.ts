@@ -1,0 +1,334 @@
+import type { ThreadMessage, ToolCallMessagePart } from '@ngx-assistant/engine';
+import { toLanguageModelMessages } from './to-language-model-messages';
+
+const createFileMessage = (data: string): Extract<ThreadMessage, { role: 'user' }> => ({
+  id: 'user-1',
+  role: 'user',
+  createdAt: new Date('2026-01-01T00:00:00.000Z'),
+  content: [{ type: 'file', data, mimeType: 'text/plain' }],
+  attachments: [],
+  metadata: { custom: {} },
+});
+
+const createToolMessage = (part: Partial<ToolCallMessagePart>): ThreadMessage => ({
+  id: 'assistant-1',
+  role: 'assistant',
+  createdAt: new Date(0),
+  status: { type: 'requires-action', reason: 'tool-calls' },
+  metadata: {
+    custom: {},
+    steps: [],
+    unstable_data: [],
+    unstable_annotations: [],
+    unstable_state: {},
+  },
+  content: [
+    {
+      type: 'tool-call',
+      toolCallId: 'call-1',
+      toolName: 'lookup',
+      args: {},
+      argsText: '{}',
+      ...part,
+    },
+  ],
+});
+
+const convertFileData = (data: string) => {
+  const [message] = toLanguageModelMessages([createFileMessage(data)]);
+  if (message?.role !== 'user') throw new Error('Expected a user message');
+
+  const [part] = message.content;
+  if (part?.type !== 'file') throw new Error('Expected a file part');
+
+  return part.data;
+};
+
+describe('toLanguageModelMessages', () => {
+  describe.each([false, true])('tool model content with message IDs %s', (unstable_includeId) => {
+    const convertTool = (part: Partial<ToolCallMessagePart>) =>
+      toLanguageModelMessages([createToolMessage(part)], {
+        unstable_includeId,
+      }).find((message) => message.role === 'tool')?.content[0];
+
+    it('sends explicit text and media instead of the UI result', () => {
+      expect(
+        convertTool({
+          result: { documentId: 'report-1' },
+          modelContent: [
+            { type: 'text', text: 'Report contents' },
+            {
+              type: 'file',
+              data: 'JVBERi0xLjQ=',
+              mediaType: 'application/pdf',
+              filename: 'report.pdf',
+            },
+            { type: 'file', data: 'iVBORw0KGgo=', mediaType: 'image/png' },
+          ],
+        }),
+      ).toEqual({
+        type: 'tool-result',
+        toolCallId: 'call-1',
+        toolName: 'lookup',
+        output: {
+          type: 'content',
+          value: [
+            { type: 'text', text: 'Report contents' },
+            {
+              type: 'media',
+              data: 'JVBERi0xLjQ=',
+              mediaType: 'application/pdf',
+            },
+            { type: 'media', data: 'iVBORw0KGgo=', mediaType: 'image/png' },
+          ],
+        },
+      });
+    });
+
+    it('honors explicitly empty model content', () => {
+      expect(convertTool({ result: 'UI only', modelContent: [] })?.output).toEqual({
+        type: 'content',
+        value: [],
+      });
+    });
+
+    it('keeps error results even when model content is present', () => {
+      expect(
+        convertTool({
+          result: { error: 'failed' },
+          isError: true,
+          modelContent: [{ type: 'text', text: 'Preview' }],
+        })?.output,
+      ).toEqual({ type: 'error-json', value: { error: 'failed' } });
+    });
+  });
+
+  it('skips an assistant message without content instead of throwing', () => {
+    expect(toLanguageModelMessages([{ id: 'a', role: 'assistant' }] as never)).toEqual([]);
+  });
+
+  it('skips an attachment without content instead of throwing', () => {
+    expect(
+      toLanguageModelMessages([
+        { id: 'u', role: 'user', content: [], attachments: [{ id: 'a' }] },
+      ] as never),
+    ).toEqual([]);
+  });
+
+  it('preserves IDs when an earlier message produces no model message', () => {
+    const messages: ThreadMessage[] = [
+      {
+        id: 'empty-user',
+        role: 'user',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        content: [],
+        attachments: [],
+        metadata: { custom: {} },
+      },
+      {
+        id: 'visible-user',
+        role: 'user',
+        createdAt: new Date('2026-01-01T00:00:01.000Z'),
+        content: [{ type: 'text', text: 'hello' }],
+        attachments: [],
+        metadata: { custom: {} },
+      },
+    ];
+
+    expect(toLanguageModelMessages(messages, { unstable_includeId: true })).toEqual([
+      {
+        role: 'user',
+        content: [{ type: 'text', text: 'hello' }],
+        unstable_id: 'visible-user',
+      },
+    ]);
+  });
+
+  it('preserves the source ID on split assistant messages', () => {
+    const messages: ThreadMessage[] = [
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        content: [
+          { type: 'text', text: 'before' },
+          {
+            type: 'tool-call',
+            toolCallId: 'call-1',
+            toolName: 'lookup',
+            args: { query: 'ngx-assistant' },
+            argsText: '{"query":"ngx-assistant"}',
+            result: { found: true },
+          },
+          { type: 'text', text: 'after' },
+        ],
+        status: { type: 'complete', reason: 'stop' },
+        metadata: {
+          unstable_state: {},
+          unstable_annotations: [],
+          unstable_data: [],
+          steps: [],
+          custom: {},
+        },
+      },
+    ];
+
+    const converted = toLanguageModelMessages(messages, {
+      unstable_includeId: true,
+    });
+
+    expect(converted.map((message) => message.role)).toEqual(['assistant', 'tool', 'assistant']);
+    expect(converted[0]).toHaveProperty('unstable_id', 'assistant-1');
+    expect(converted[1]).not.toHaveProperty('unstable_id');
+    expect(converted[2]).toHaveProperty('unstable_id', 'assistant-1');
+  });
+
+  describe.each<[string, Partial<ToolCallMessagePart>]>([
+    ['a pending approval', { approval: { id: 'approval-1' } }],
+    ['an approved call awaiting execution', { approval: { id: 'approval-1', approved: true } }],
+    ['an interrupted call', { interrupt: { type: 'human', payload: {} } }],
+  ])('message IDs with %s', (_label, part) => {
+    it.each([false, true])(
+      'closes a followed call without changing its source (empty next message: %s)',
+      (empty) => {
+        const assistant = createToolMessage(part);
+        const user = {
+          ...createFileMessage('SGVsbG8='),
+          ...(empty ? { content: [] } : {}),
+        };
+        const messages = [assistant, user];
+        const original = structuredClone(messages);
+        const plain = toLanguageModelMessages(messages);
+        expect(plain.map((message) => message.role)).toEqual(
+          empty ? ['assistant', 'tool'] : ['assistant', 'tool', 'user'],
+        );
+        const withIds = toLanguageModelMessages(messages, {
+          unstable_includeId: true,
+        });
+        expect(withIds.map(({ role, content }) => ({ role, content }))).toEqual(plain);
+        expect(withIds[0]).toHaveProperty('unstable_id', 'assistant-1');
+        expect(withIds[1]).not.toHaveProperty('unstable_id');
+        if (!empty) expect(withIds[2]).toHaveProperty('unstable_id', 'user-1');
+        expect(messages).toEqual(original);
+      },
+    );
+
+    it('keeps the last call awaiting the host', () => {
+      const messages = [createToolMessage(part)];
+      const plain = toLanguageModelMessages(messages);
+      expect(plain.map((message) => message.role)).toEqual(['assistant']);
+      const withIds = toLanguageModelMessages(messages, {
+        unstable_includeId: true,
+      });
+      expect(withIds.map(({ role, content }) => ({ role, content }))).toEqual(plain);
+      expect(withIds[0]).toHaveProperty('unstable_id', 'assistant-1');
+    });
+  });
+
+  it.each<Partial<ToolCallMessagePart>>([
+    { approval: { id: 'approval-1', approved: false } },
+    { approval: { id: 'approval-1', resolution: 'cancelled' } },
+    { result: { partial: true }, isPreliminary: true },
+    { result: { error: 'lookup failed' }, isError: true },
+  ])('preserves terminal and preliminary results with IDs: %j', (part) => {
+    const messages = [createToolMessage(part)];
+    const plain = toLanguageModelMessages(messages);
+    expect(plain.map((message) => message.role)).toEqual(['assistant', 'tool']);
+    const withIds = toLanguageModelMessages(messages, {
+      unstable_includeId: true,
+    });
+    expect(withIds.map(({ role, content }) => ({ role, content }))).toEqual(plain);
+  });
+
+  it('carries a file part filename through to the model message', () => {
+    const [message] = toLanguageModelMessages([
+      {
+        id: 'user-1',
+        role: 'user',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        content: [
+          {
+            type: 'file',
+            data: 'SGVsbG8=',
+            mimeType: 'text/plain',
+            filename: 'notes.txt',
+          },
+        ],
+        attachments: [],
+        metadata: { custom: {} },
+      },
+    ]);
+    if (message?.role !== 'user') throw new Error('Expected a user message');
+
+    expect(message.content[0]).toMatchObject({
+      type: 'file',
+      filename: 'notes.txt',
+    });
+  });
+
+  it('preserves generated files in assistant history', () => {
+    expect(
+      toLanguageModelMessages([
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+          content: [
+            {
+              type: 'file',
+              data: 'iVBORw0KGgo=',
+              mimeType: 'image/png',
+              filename: 'generated.png',
+            },
+          ],
+          status: { type: 'complete', reason: 'stop' },
+          metadata: {
+            unstable_state: {},
+            unstable_annotations: [],
+            unstable_data: [],
+            steps: [],
+            custom: {},
+          },
+        },
+      ]),
+    ).toEqual([
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'file',
+            data: 'iVBORw0KGgo=',
+            mediaType: 'image/png',
+            filename: 'generated.png',
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('omits filename when the part has none', () => {
+    const [message] = toLanguageModelMessages([createFileMessage('SGVsbG8=')]);
+    if (message?.role !== 'user') throw new Error('Expected a user message');
+
+    expect(message.content[0]).not.toHaveProperty('filename');
+  });
+
+  it('preserves base64 file data as a string', () => {
+    expect(convertFileData('SGVsbG8=')).toBe('SGVsbG8=');
+  });
+
+  it('preserves absolute file URLs', () => {
+    const data = convertFileData('https://example.com/file.txt');
+
+    expect(data).toBeInstanceOf(URL);
+    expect(String(data)).toBe('https://example.com/file.txt');
+  });
+
+  it('preserves data URLs', () => {
+    const url = 'data:text/plain;base64,SGVsbG8=';
+    const data = convertFileData(url);
+
+    expect(data).toBeInstanceOf(URL);
+    expect(String(data)).toBe(url);
+  });
+});

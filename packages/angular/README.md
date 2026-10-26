@@ -51,6 +51,36 @@ Destroying the injector fences the thread's in-flight work, such as an attachmen
 pending, and ends voice, dictation and speech. It does not call `onCancel`: a run in your store goes
 on until you stop it.
 
+`provideDataStreamRuntime(options)` sends each run to a streaming backend and keeps the rest of
+`provideLocalRuntime`, whose options it also takes. Every run is a JSON `POST` to `api` with the
+conversation in the AI SDK message format (`toLanguageModelMessages`), the system prompt, the tools
+of the model context as JSON Schema, the run config, the call settings and config of the model
+context, and last the fields of `body`, which override the others. The reply is read as
+a UI message stream, what `streamText(...).toUIMessageStreamResponse()` sends, or as a data stream:
+`protocol` picks one, otherwise the response's protocol header does, otherwise the UI message
+stream. `options` can be a factory run once in the injection context.
+
+```ts
+providers: [
+  provideDataStreamRuntime(() => {
+    const auth = inject(AuthService);
+    return {
+      api: '/api/chat',
+      headers: async () => ({ Authorization: `Bearer ${await auth.token()}` }),
+      onError: (error) => console.error(error),
+    };
+  }),
+];
+```
+
+Tools of the model context with `execute` run in the browser and their results go back to the
+backend on the next step. A tool call the browser cannot answer, such as one for a tool without
+`execute`, stays open (`requires-action`) until `addToolResult` on its part, which resumes the run.
+Cancelling aborts the request and calls `onCancel`; destroying the injector aborts it too, without
+`onCancel`. `onError` reports failed requests and streams, never a cancelled run; an `onResponse`
+that throws or rejects fails the run without it. Approval requests the backend sends for its own
+tools are not supported yet: they are ignored and the call stays open.
+
 ## Scopes
 
 Each runtime lives in a scope of the injector tree, and `inject*()` returns the nearest one:
