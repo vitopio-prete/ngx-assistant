@@ -132,6 +132,7 @@ Each runtime lives in a scope of the injector tree, and `inject*()` returns the 
 | `injectThreadList()`     | `NXA_THREAD_LIST`      | a runtime provider                                         |
 | `injectThreadListItem()` | `NXA_THREAD_LIST_ITEM` | `provideThreadListItemScope(() => item)`                   |
 | `injectSuggestion()`     | `NXA_SUGGESTION`       | `provideSuggestionScope(() => suggestion)`                 |
+| `injectToolCall()`       | `NXA_TOOL_CALL`        | `providePartScope(() => part)`, for a `tool-call` part     |
 
 Inside a message scope `injectComposer()` returns the message's edit composer; the thread composer
 stays reachable as `injectThread().composer`. `injectMessageUi()` holds the view state of the message
@@ -340,7 +341,8 @@ edit composer; inside a row of `*nxaMessageParts`, `injectPart()` is the row's p
 the thread, wherever it moves; a new message id creates a new row. In a message, a tool call whose
 `toolCallId` is unique keeps its row when the parts are reordered, and any other part keeps its row
 while the part at its position keeps its type. Read the signal into a variable (`@let p = part()`)
-so that `@switch` narrows the part type.
+so that `@switch` narrows the part type. A `tool-call` part whose tool has a registered UI is
+rendered by that component instead of the template (see [Tool UIs](#tool-uis)).
 
 `*nxaMessageIf` conditions, each checked only when given: `user`, `assistant`, `system`, `last`,
 `copied`, `speaking`, `hasAttachments`, `hasContent` (`true` or `false`); `hasBranches` and
@@ -589,6 +591,121 @@ the button is disabled, as it is while sending is disabled or a voice session do
 text. Without `send`, the prompt replaces the composer text, or is added after it with
 `clearComposer` off. The button is disabled while the thread is disabled, takes `disabled`, and
 can be vetoed like the composer buttons.
+
+## Tool UIs
+
+Register the component that renders the calls of a tool, and a fallback for the others:
+
+```ts
+import { injectToolCall, provideToolUi } from '@ngx-assistant/angular';
+
+@Component({
+  selector: 'app-weather-card',
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    @if (tool.result(); as result) {
+      {{ tool.args().city }}: {{ result }}
+    } @else {
+      Checking {{ tool.args().city }}...
+    }
+  `,
+})
+export class WeatherCard {
+  readonly tool = injectToolCall<{ city: string }, string>();
+}
+```
+
+```ts
+providers: [
+  provideLocalRuntime(model),
+  provideToolUi({ toolName: 'get_weather', component: WeatherCard }),
+  provideToolUi({ fallback: ToolCallCard }),
+];
+```
+
+`*nxaMessageParts` renders a `tool-call` part with the UI of its tool, else with the fallback, else
+with its own template. `provideToolUi(...)` goes in the `providers` of the application, a route or
+a component. A tool name is looked up from the nearest level of the injector tree up to the root
+before any fallback is used, and within a level the first declaration wins. Each runtime provider
+also has a registry for UIs registered at runtime, which `injectToolUiRegistry().register(name,
+component)` reaches: it returns the function that removes the registration, and a runtime
+registration comes before the UIs declared at its level. A nested runtime provider still sees the
+UIs of the outer ones. A change of UI creates the row again with the new component, or with the
+template once no UI is left.
+
+`injectToolCall()` works in a registered UI and in the template of `*nxaMessageParts` alike. It
+gives `part`, `args`, `result`, `status` and `approval` as signals, and the actions `addResult`
+(complete the call, for a tool that waits on the user), `resume` (answer an `interrupt`) and
+`respondToApproval`, which rejects when the runtime refuses the answer.
+
+## Tool approval primitives
+
+Headless controls for a tool call gated by an approval request (`approval` on the part). A call
+that waits on an `interrupt` or on a result from the user is answered with `injectToolCall()`
+instead (`resume`, `addResult`): these controls stay disabled for it.
+
+```ts
+import {
+  NxaToolApprovalApprove,
+  NxaToolApprovalDeny,
+  NxaToolApprovalOption,
+  NxaToolApprovalRoot,
+  NxaToolApprovalText,
+} from '@ngx-assistant/angular';
+```
+
+<!-- prettier-ignore -->
+```html
+<div nxaToolApprovalRoot #approval="nxaToolApprovalRoot">
+  @let state = approval.state;
+  @if (state.pending()) {
+    <p>{{ state.approval()?.prompt }}</p>
+    @for (option of state.options(); track option.id) {
+      <button [nxaToolApprovalOption]="option">{{ option.label ?? option.id }}</button>
+    } @empty {
+      <button nxaToolApprovalApprove>Allow</button>
+      <button nxaToolApprovalDeny>Deny</button>
+    }
+    @if (state.acceptsText()) {
+      <textarea nxaToolApprovalText></textarea>
+    }
+  } @else if (state.receipt(); as receipt) {
+    <p>{{ receipt.outcome }}</p>
+  }
+</div>
+```
+
+| Directive                                                                        | Behavior                                                                             |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `[nxaToolApprovalRoot]`                                                          | Holds the request of the nearest tool call and the state of its controls (`state`).  |
+| `button[nxaToolApprovalApprove]`, `button[nxaToolApprovalDeny]`                  | Allow or deny a decision, with the typed draft as a note when there is one.          |
+| `button[nxaToolApprovalOption]`                                                  | Answers with an option, or opens its confirmation step when the option asks for one. |
+| `button[nxaToolApprovalConfirm]`, `button[nxaToolApprovalConfirmCancel]`         | Confirm the option waiting for it, or go back.                                       |
+| `textarea[nxaToolApprovalText]`                                                  | The typed answer of a question, or the note of a decision.                           |
+| `button[nxaToolApprovalSubmitText]`                                              | Sends the typed draft as the answer to a question that takes one.                    |
+| `button[nxaToolApprovalDismiss]`                                                 | Dismisses a question that declares itself `dismissible`, without the typed draft.    |
+| `*nxaToolApprovalQuestions`                                                      | One row per question of a `display: "questions"` request.                            |
+| `button[nxaToolApprovalQuestionOption]`, `textarea[nxaToolApprovalQuestionText]` | Answer the question of their row; a single-choice question keeps one option.         |
+| `button[nxaToolApprovalSubmitAnswers]`                                           | Sends every answer, once each question has one.                                      |
+
+`state` (also `injectToolApproval()`) gives the request as `approval`, and `outcome`, `pending`,
+`receipt` (its `outcome`, whether it was `answered` or decided, `automatic`, the chosen `option`,
+the `notes` and the questionnaire `answers`), `display`, `isQuestion`, `dismissible`,
+`acceptsText`, `canSubmitText`, `options` (allowing kinds first, then custom kinds, then refusing
+ones), `questions`, `questionsComplete`, `draft`, `confirming`, `submitting`, `error`, `canAnswer`
+and `locked`, plus the methods behind the controls. An option of a custom kind is an answer, so it
+approves; a known kind lets the runtime derive the decision. A decision can always be denied; a
+question is not allowed or denied, and is refused only with a dismissal it declares.
+
+The root host carries `data-nxa-approval` (`pending`, `approved`, `denied`, `cancelled` or
+`expired`), `data-nxa-display`, `data-nxa-submitting` and `aria-busy` while an answer is on its
+way, `data-nxa-error` and `data-nxa-confirming`. A request is pending while its call requires
+action: an open request whose run was cancelled shows no state and takes no answer. Once an answer
+is sent the controls stay locked until the request settles. A refused answer unlocks them and sets
+`error`; a refusal that arrives after another request took over is dropped. The draft, the chosen
+options, the confirmation step and the error belong to the pending request: they start afresh when
+another request arrives. The controls are also disabled when the thread cannot answer tool calls or
+a voice session holds it.
 
 ## Build and test
 

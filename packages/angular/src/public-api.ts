@@ -19,3 +19,4 @@ export * from './lib/suggestions';
 export * from './lib/data-stream';
 export * from './lib/runtime-adapters';
 export * from './lib/remote-thread-list';
+export * from './lib/tools';

@@ -4,7 +4,9 @@ import {
   Provider,
   Signal,
   TemplateRef,
+  Type,
   ViewContainerRef,
+  ViewRef,
   untracked,
 } from '@angular/core';
 import { fromRuntime, type RuntimeSubscribable } from '../from-runtime';
@@ -21,22 +23,30 @@ export interface NxaRowContext<S> {
   last: boolean;
 }
 
-/** One row a list wants rendered: its key, and how to create its runtime. */
+/**
+ * One row a list wants rendered: its key, how to create its runtime, and optionally a component
+ * that renders the row instead of the template. A row keeps what it was created with, so a key
+ * that should switch between template and component must change with it.
+ */
 export interface KeyedRow<R> {
   key: string;
   create(): R;
+  component?: Type<unknown> | undefined;
 }
 
 interface Row<S> {
-  view: EmbeddedViewRef<NxaRowContext<S>>;
+  view: ViewRef;
+  // Only template rows have a context to keep up to date.
+  context: NxaRowContext<S> | null;
   injector: Injector & { destroy(): void };
 }
 
 /**
- * Keeps one embedded view per key in a view container. A row keeps its view, and the runtime it
- * was created with, while its key stays in the list; it moves with the key, and a new key creates
- * a new row. The keys of one update must be unique. Each row has its own injector with the row's
- * scope, destroyed with the row, which ends the subscriptions made in it.
+ * Keeps one view per key in a view container: an embedded view of the template, or a component
+ * when the row names one. A row keeps its view, and the runtime it was created with, while its key
+ * stays in the list; it moves with the key, and a new key creates a new row. The keys of one update
+ * must be unique. Each row has its own injector with the row's scope, destroyed with the row,
+ * which ends the subscriptions made in it.
  */
 export class KeyedViews<S, R extends RuntimeSubscribable<S>> {
   private readonly rows = new Map<string, Row<S>>();
@@ -74,7 +84,8 @@ export class KeyedViews<S, R extends RuntimeSubscribable<S>> {
         return;
       }
       if (this.container.indexOf(row.view) !== index) this.container.move(row.view, index);
-      const context = row.view.context;
+      const context = row.context;
+      if (!context) return;
       const first = index === 0;
       const last = index === count - 1;
       if (
@@ -95,13 +106,17 @@ export class KeyedViews<S, R extends RuntimeSubscribable<S>> {
       providers: this.scope(() => runtime),
       parent: this.parent,
     }) as Injector & { destroy(): void };
+    if (entry.component) {
+      const ref = this.container.createComponent(entry.component, { index, injector });
+      return { view: ref.hostView, context: null, injector };
+    }
     const state = fromRuntime(runtime, undefined, { injector });
-    const view = this.container.createEmbeddedView(
+    const view: EmbeddedViewRef<NxaRowContext<S>> = this.container.createEmbeddedView(
       this.template,
       { $implicit: state, index, count, first: index === 0, last: index === count - 1 },
       { index, injector },
     );
-    return { view, injector };
+    return { view, context: view.context, injector };
   }
 
   private destroy(row: Row<S>) {
