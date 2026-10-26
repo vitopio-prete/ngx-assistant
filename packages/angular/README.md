@@ -81,6 +81,41 @@ Cancelling aborts the request and calls `onCancel`; destroying the injector abor
 that throws or rejects fails the run without it. Approval requests the backend sends for its own
 tools are not supported yet: they are ignored and the call stays open.
 
+`provideRemoteThreadListRuntime(options)` persists the threads through a
+`RemoteThreadListAdapter` (`list`, `initialize`, `rename`, `archive`, `unarchive`, `delete`,
+`generateTitle`, `fetch`) and runs each thread on its own runtime. `runtime` returns the providers
+of that runtime, such as `provideLocalRuntime(...)` or `provideDataStreamRuntime(...)`; they go on a
+child injector of the one the list is provided on, created when the list starts the thread and
+destroyed when it stops it (delete, a new adapter, the list destroyed), which aborts the thread's
+running request. A thread the user switches away from keeps its runtime, and a run in it goes on.
+`runtime` is called in the injection context of the list's injector. A new thread is created on the
+backend with `initialize` before its first run, which then carries its remote id, and gets a title
+from `generateTitle` once its first message settles. `InMemoryThreadListAdapter` keeps the threads
+in memory.
+
+```ts
+providers: [
+  provideRemoteThreadListRuntime(() => {
+    const route = inject(ChatRoute);
+    return {
+      adapter: inject(ThreadsAdapter),
+      runtime: () => provideDataStreamRuntime({ api: '/api/chat' }),
+      threadId: route.threadId, // a Signal<string | undefined>
+      onThreadIdChange: (threadId) => route.navigate(threadId),
+    };
+  }),
+];
+```
+
+Model context registered on the list runtime, tools and instructions included, reaches the request
+of every thread: the thread injector holds the list's adapters as `NXA_RUNTIME_ADAPTERS`, which the
+local, data stream and external store runtimes read. It also holds the thread's list item as
+`NXA_REMOTE_THREAD_ITEM`, so a runtime factory can build a history adapter for that thread; the
+adapter's `unstable_Provider` and `unstable_useAdapters` are ignored. With
+`threadId`, the list shows the thread with that remote id, or a new thread for `undefined`, and
+`onThreadIdChange` reports the switches the user makes, not those made through `threadId`. A
+failed list load is retried when the browser comes back online or the page becomes visible.
+
 ## Scopes
 
 Each runtime lives in a scope of the injector tree, and `inject*()` returns the nearest one:
@@ -517,8 +552,8 @@ The list gives `let thread` as a `Signal` of the thread list item state, plus `i
 keeps the row and the state of the components in it. The arrow keys follow the document order,
 skip disabled triggers, do not wrap and leave keys with a modifier alone; a `keydown` listener on the trigger can veto
 the move. A failed action is reported with `console.error`. The runtime decides which threads
-exist: `provideExternalStoreRuntime` lists those of its `adapters.threadList`, while
-`provideLocalRuntime` keeps a single thread and lists none.
+exist: `provideRemoteThreadListRuntime` lists those of its adapter, `provideExternalStoreRuntime`
+those of its `adapters.threadList`, while `provideLocalRuntime` keeps a single thread and lists none.
 
 ## Suggestion primitives
 
