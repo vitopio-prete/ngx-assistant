@@ -1,68 +1,54 @@
-import { ChangeDetectionStrategy, Component, computed } from '@angular/core';
-import { fromRuntime, injectThread, provideLocalRuntime } from '@ngx-assistant/angular';
-import { echoModel } from './echo-model';
+import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { provideExternalStoreRuntime } from '@ngx-assistant/angular';
+import type { ExternalStoreAdapter } from '@ngx-assistant/engine';
+import { Chat } from './chat';
+import { ThreadSidebar } from './thread-sidebar';
+import { ThreadStore } from './thread-store';
 
+/**
+ * The demo shell. The thread list runs on an external store runtime that only knows the
+ * conversations of `ThreadStore`; each conversation is a chat with its own local runtime, kept
+ * alive while another one is shown, so it keeps its messages and branches.
+ */
 @Component({
   selector: 'nxa-demo-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [provideLocalRuntime(echoModel)],
+  imports: [Chat, ThreadSidebar],
+  providers: [
+    ThreadStore,
+    provideExternalStoreRuntime(() => {
+      const store = inject(ThreadStore);
+      return computed((): ExternalStoreAdapter => ({
+        messages: [],
+        // The conversations are written in their own chats, never in this thread.
+        onNew: async () => undefined,
+        adapters: {
+          threadList: {
+            threadId: store.mainId(),
+            threads: store.threads(),
+            archivedThreads: store.archived(),
+            onSwitchToNewThread: () => store.create(),
+            onSwitchToThread: (id: string) => store.switchTo(id),
+            onArchive: (id: string) => store.archive(id),
+            onUnarchive: (id: string) => store.unarchive(id),
+            onDelete: (id: string) => store.delete(id),
+          },
+        },
+      }));
+    }),
+  ],
   template: `
-    <h1>ngx-assistant demo</h1>
-    <ul id="messages">
-      @for (message of messages(); track message.id) {
-        <li [attr.data-role]="message.role">
-          <b>{{ message.role }}:</b>
-          @for (part of message.content; track $index) {
-            @if (part.type === 'text') {
-              <span>{{ part.text }}</span>
-            }
-          }
-        </li>
+    <aside class="sidebar">
+      <h1>ngx-assistant</h1>
+      <nxa-demo-thread-sidebar />
+    </aside>
+    <main class="main">
+      @for (id of store.ids(); track id) {
+        <nxa-demo-chat [threadId]="id" [hidden]="id !== store.mainId()" />
       }
-    </ul>
-    <textarea
-      id="input"
-      aria-label="Message"
-      [value]="text()"
-      (input)="setText($event)"
-      (keydown)="onKeydown($event)"
-    ></textarea>
-    <button id="send" type="button" [disabled]="sendDisabled()" (click)="send()">Send</button>
-    <button id="cancel" type="button" [disabled]="!isRunning()" (click)="cancel()">Stop</button>
-    <p id="status">{{ isRunning() ? 'running' : 'idle' }}</p>
+    </main>
   `,
 })
 export class App {
-  private readonly thread = injectThread();
-  protected readonly messages = fromRuntime(this.thread, (s) => s.messages);
-  protected readonly isRunning = fromRuntime(this.thread, (s) => s.isRunning);
-  protected readonly text = fromRuntime(this.thread.composer, (s) => s.text);
-  private readonly canSend = fromRuntime(this.thread.composer, (s) => s.canSend);
-  private readonly canQueue = fromRuntime(this.thread, (s) => s.capabilities.queue);
-  // Without a queue, a send during a run would start a second run: block it until the run ends.
-  protected readonly sendDisabled = computed(
-    () => !this.canSend() || (this.isRunning() && !this.canQueue()),
-  );
-
-  protected setText(event: Event) {
-    this.thread.composer.setText((event.target as HTMLTextAreaElement).value);
-  }
-
-  protected onKeydown(event: KeyboardEvent) {
-    // Shift+Enter inserts a newline; Enter while an IME is composing confirms the composition.
-    if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
-    // While sending is blocked, Enter keeps its default behavior instead of being swallowed.
-    if (this.sendDisabled()) return;
-    event.preventDefault();
-    this.send();
-  }
-
-  protected send() {
-    if (this.sendDisabled()) return;
-    this.thread.composer.send();
-  }
-
-  protected cancel() {
-    this.thread.cancelRun();
-  }
+  protected readonly store = inject(ThreadStore);
 }
