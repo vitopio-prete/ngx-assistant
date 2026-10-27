@@ -116,6 +116,71 @@ adapter's `unstable_Provider` and `unstable_useAdapters` are ignored. With
 `onThreadIdChange` reports the switches the user makes, not those made through `threadId`. A
 failed list load is retried when the browser comes back online or the page becomes visible.
 
+`provideAssistantTransportRuntime(options)` (experimental) drives an agent on your server, written
+in any language. The browser sends commands, `add-message`, `add-tool-result` or your own, together
+with the current agent state, as a JSON `POST` to `api`; the server streams the new state back in
+the `data-stream` protocol (the default) or the `assistant-transport` protocol over SSE, and
+`converter` turns the state into the messages and run state of the thread. One request runs at a
+time: commands sent meanwhile go out together in the next one. The body also carries the system
+prompt, the tools of the model context as JSON Schema, its call settings and config, `threadId`,
+`parentId` and the fields of `body`; `prepareSendCommandsRequest` can rewrite it. `options` can be a
+factory run once in the injection context (once per thread inside a remote thread list).
+
+```ts
+providers: [
+  provideAssistantTransportRuntime({
+    api: '/api/agent',
+    protocol: 'assistant-transport',
+    initialState: { messages: [] } as AgentState,
+    converter: (state, { pendingCommands, isSending }) => ({
+      messages: toThreadMessages(state, pendingCommands),
+      isRunning: isSending,
+    }),
+  }),
+];
+```
+
+`converter` also receives the commands not yet confirmed by the server and the status of the
+frontend tools. A user message still pending is marked `isOptimistic`; it keeps the id its command
+carries, so a backend that stores that id replaces it in place. Tools of the model context with
+`execute` run in the browser when the server calls them, and their results go back as
+`add-tool-result` commands, like the results given through `addToolResult`. Cancelling aborts the
+request and calls `onCancel` with the commands it drops; `onError` gets the commands of a failed
+run, and `updateState` on both lets you show it. Destroying the injector aborts the request without
+any callback, even when `onError` settles later. With `resumeApi`, `thread.resumeRun(...)` reconnects to a run in progress: with
+`resumeStateApi` the server first returns `{ runId, state }`, the state the run started from. A
+response with the `Nxa-Replay-Content-Length` header replays that many bytes with the thread
+loading, before the live ones.
+
+Every request carries the thread's remote id as `threadId`. Threads live in memory by default; to
+persist them, return `provideAssistantTransportRuntime(...)` as the `runtime` of
+`provideRemoteThreadListRuntime`, where it becomes the runtime of each thread.
+
+In components, `injectAssistantTransportState(selector?)` reads the agent state of the thread the
+runtime shows as a `Signal`, and `injectAssistantTransportSendCommand()` returns a function that
+sends a command. Declare custom commands and the state type with module augmentation:
+
+```ts
+declare module '@ngx-assistant/engine' {
+  namespace Assistant {
+    interface Commands {
+      restart: { type: 'restart-session' };
+    }
+    interface ExternalState {
+      agent: AgentState;
+    }
+  }
+}
+
+readonly todos = injectAssistantTransportState((state) => state.todos);
+private readonly sendCommand = injectAssistantTransportSendCommand();
+```
+
+Until the first thread starts, a moment after the runtime is created, the state signal holds the
+selection of `initialState` and sending a command throws. Inside a remote thread list, which does not
+know that state, the signal holds `undefined` meanwhile and the selector is not called. Server-side
+tool approvals are not supported: answer a tool call from the browser with `addToolResult`.
+
 ## Scopes
 
 Each runtime lives in a scope of the injector tree, and `inject*()` returns the nearest one:

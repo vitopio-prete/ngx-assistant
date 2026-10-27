@@ -1,11 +1,6 @@
-import { DestroyRef, Provider, Signal, effect, inject, isSignal, untracked } from '@angular/core';
-import {
-  AssistantRuntimeImpl,
-  ExternalStoreRuntimeCore,
-  disposeThreadRuntime,
-  type ExternalStoreAdapter,
-} from '@ngx-assistant/engine';
-import { NXA_RUNTIME_ADAPTERS } from './runtime-adapters';
+import { Provider, Signal, effect, isSignal, untracked } from '@angular/core';
+import type { ExternalStoreAdapter } from '@ngx-assistant/engine';
+import { createExternalStoreAssistantRuntime } from './create-external-store-runtime';
 import { provideAssistantScope } from './scopes';
 
 type AdapterSource<T> = ExternalStoreAdapter<T> | Signal<ExternalStoreAdapter<T>>;
@@ -43,34 +38,18 @@ export function provideExternalStoreRuntime<T>(
   return provideAssistantScope(() => {
     const source = isSignal(adapter) || typeof adapter !== 'function' ? adapter : adapter();
     const store = isSignal(source) ? source : undefined;
-    const { modelContext, feedback } = inject(NXA_RUNTIME_ADAPTERS, { optional: true }) ?? {};
-    // The feedback adapter of a thread list applies when the store brings none.
-    const adapt = (next: ExternalStoreAdapter<T>): ExternalStoreAdapter<T> =>
-      feedback && !next.adapters?.feedback
-        ? { ...next, adapters: { ...next.adapters, feedback } }
-        : next;
     let current = store ? untracked(store) : (source as ExternalStoreAdapter<T>);
-    const core = new ExternalStoreRuntimeCore(adapt(current));
+    const { runtime, setAdapter } = createExternalStoreAssistantRuntime(current);
 
     if (store) {
       effect(() => {
         const next = store();
         if (next === current) return;
         // Subscribers run synchronously here, and what they read must not become a dependency.
-        untracked(() => core.setAdapter(adapt(next)));
+        untracked(() => setAdapter(next));
         current = next;
       });
     }
-
-    const runtime = new AssistantRuntimeImpl(core);
-    const unregisterModelContext = modelContext
-      ? runtime.registerModelContextProvider(modelContext)
-      : undefined;
-    // The thread list may have replaced the main thread since creation, so it is read at the end.
-    inject(DestroyRef).onDestroy(() => {
-      unregisterModelContext?.();
-      disposeThreadRuntime(core.threads.getMainThreadRuntimeCore());
-    });
     return runtime;
   });
 }
