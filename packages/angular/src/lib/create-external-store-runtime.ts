@@ -6,7 +6,7 @@ import {
   type AssistantRuntime,
   type ExternalStoreAdapter,
 } from '@ngx-assistant/engine';
-import { NXA_RUNTIME_ADAPTERS } from './runtime-adapters';
+import { injectRuntimeAdapters } from './inject-runtime-adapters';
 
 /**
  * Creates a runtime whose messages and run state live in a store outside the engine and ties it
@@ -15,16 +15,16 @@ import { NXA_RUNTIME_ADAPTERS } from './runtime-adapters';
  *
  * `setAdapter` hands a new adapter to the runtime; its subscribers run synchronously, so callers
  * outside a store write should not call it from inside an engine callback. Inside a thread of a
- * remote thread list, the list's model context is registered on the runtime and its feedback
- * adapter applies when the store brings none. When the injector is destroyed, the thread's
- * in-flight work is fenced and voice, dictation and speech end.
+ * remote thread list, the list's model context is registered on the runtime. The feedback adapter
+ * of `provideRuntimeAdapters` applies when the store brings none. When the injector is destroyed,
+ * the thread's in-flight work is fenced and voice, dictation and speech end.
  */
 export function createExternalStoreAssistantRuntime<T>(adapter: ExternalStoreAdapter<T>): {
   runtime: AssistantRuntime;
   setAdapter: (adapter: ExternalStoreAdapter<T>) => void;
 } {
-  const { modelContext, feedback } = inject(NXA_RUNTIME_ADAPTERS, { optional: true }) ?? {};
-  // The feedback adapter of a thread list applies when the store brings none.
+  const { modelContext, feedback } = injectRuntimeAdapters();
+  // The provided feedback adapter applies when the store brings none.
   const adapt = (next: ExternalStoreAdapter<T>): ExternalStoreAdapter<T> =>
     feedback && !next.adapters?.feedback
       ? { ...next, adapters: { ...next.adapters, feedback } }

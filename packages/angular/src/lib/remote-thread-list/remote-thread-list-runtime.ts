@@ -36,9 +36,11 @@ export interface RemoteThreadListRuntimeOptions {
  * Each started thread runs on its own runtime, made from the `runtime` providers on a child
  * injector. That injector also holds the thread's list item (`NXA_REMOTE_THREAD_ITEM`) and the
  * list's adapters (`NXA_RUNTIME_ADAPTERS`), so tools and instructions registered on this runtime
- * reach every thread. Stopping a thread (deleting it, replacing the adapter, destroying the list)
- * destroys its injector, which aborts its running request. A thread the user switches away from
- * keeps its runtime, and a run in it goes on, until the thread is stopped.
+ * reach every thread. Adapters for one thread, such as its history, come from
+ * `provideRuntimeAdapters` among the `runtime` providers. Stopping a thread (deleting it,
+ * replacing the adapter, destroying the list) destroys its injector, which aborts its running
+ * request. A thread the user switches away from keeps its runtime, and a run in it goes on, until
+ * the thread is stopped.
  *
  * `options` can be a factory, run once in the injection context when the runtime is first
  * injected. `adapter` and `threadId` signals are handed to the runtime by an effect. The list
