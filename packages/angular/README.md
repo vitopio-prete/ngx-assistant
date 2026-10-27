@@ -797,6 +797,54 @@ options, the confirmation step and the error belong to the pending request: they
 another request arrives. The controls are also disabled when the thread cannot answer tool calls or
 a voice session holds it.
 
+## Model context
+
+What the model gets on every run of a runtime: tools, instructions and config. Each helper runs in
+an injection context (a component, a directive, a service), registers on the nearest runtime and is
+removed when its injector is destroyed. Registered on a thread list, it reaches every thread.
+
+```ts
+import {
+  injectAssistantContext,
+  injectAssistantInstructions,
+  injectAssistantTool,
+  injectModelContext,
+} from '@ngx-assistant/angular';
+
+@Component({/* ... */})
+export class WeatherPanel {
+  readonly city = signal('Rome');
+
+  constructor() {
+    injectAssistantTool({
+      toolName: 'get_weather',
+      description: 'Get the weather of a city.',
+      parameters: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] },
+      execute: async ({ city }) => fetchWeather(city as string),
+      render: WeatherCard,
+    });
+    injectAssistantInstructions('Answer in Italian.');
+    injectAssistantContext({ getContext: () => `The user is looking at ${this.city()}.` });
+  }
+}
+```
+
+`injectAssistantTool(tool)` adds a tool. With `execute` it runs in the browser and its result goes
+back to the model; without it, the call waits for the UI to answer it with `addResult`. `render` is
+registered as the UI of the tool on the tool UI registry of that runtime, so it applies wherever the
+runtime's messages render, and never reaches the model. `injectAssistantInstructions(text)` adds to the system prompt, and
+takes `{ instruction, disabled }`. `injectAssistantContext({ getContext })` adds to the system
+prompt the text that `getContext` returns on every send.
+
+The three helpers also take a function that reads signals, such as `() => ({ ...tool, description:
+description() })`: the runtime always gets the latest value and is notified (`modelContextUpdate`)
+when it changes. `injectModelContext()` gives the `modelName` and the sorted `toolNames` of the
+model context of the nearest thread as a signal.
+
+`provideDataStreamRuntime(...)` sends the system prompt, the tools as JSON Schema and the config
+(`modelName` and the like) in the request body, and so does `provideAssistantTransportRuntime(...)`.
+A local runtime hands the model context to its chat model.
+
 ## Build and test
 
 ```bash
