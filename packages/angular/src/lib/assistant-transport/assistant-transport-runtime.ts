@@ -29,7 +29,8 @@ const NXA_TRANSPORT_OPTIONS = new InjectionToken<AssistantTransportOptions<unkno
  * where it becomes the runtime of each thread. `options` can be a factory, run once in the
  * injection context when the runtime is first injected, or once per thread, in the thread's
  * injector, inside a remote thread list. Destroying the injector aborts the running
- * request without calling `onCancel`, `onError` or `onFinish`.
+ * request without calling `onCancel`, `onError` or `onFinish`. A history adapter with
+ * `unstable_copy` from `provideRuntimeAdapters` receives each settled turn of the thread.
  *
  * @example
  * ```ts
