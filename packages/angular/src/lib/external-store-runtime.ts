@@ -15,8 +15,10 @@ type AdapterSource<T> = ExternalStoreAdapter<T> | Signal<ExternalStoreAdapter<T>
  * task as a store write still sees the previous adapter until the next change detection. A plain
  * adapter is read once. When the injector is destroyed, the thread's in-flight work is fenced and
  * voice, dictation and speech end; `onCancel` is not called, so a run in your store goes on.
- * Inside a thread of a remote thread list, the list's model context is registered on the runtime
- * and its feedback adapter applies when the store brings none.
+ * Inside a thread of a remote thread list, the list's model context is registered on the runtime.
+ * A feedback adapter from `provideRuntimeAdapters` applies when the store brings none, and a
+ * history adapter there with `unstable_copy` receives each settled turn, unless the store sets
+ * `unstable_persistsHistory` or runs its own thread list.
  *
  * @example
  * ```ts

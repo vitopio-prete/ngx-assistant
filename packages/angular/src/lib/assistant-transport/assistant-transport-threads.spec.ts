@@ -16,6 +16,7 @@ import type {
 } from '@ngx-assistant/engine';
 import { provideLocalRuntime } from '../local-runtime';
 import { provideRemoteThreadListRuntime } from '../remote-thread-list';
+import { NXA_REMOTE_THREAD_ITEM, provideRuntimeAdapters } from '../runtime-adapters';
 import { injectAssistant } from '../scopes';
 import { provideAssistantTransportRuntime } from './assistant-transport-runtime';
 import {
@@ -718,5 +719,44 @@ describe('injectAssistantTransportState and injectAssistantTransportSendCommand'
         type: 'ping',
       } as unknown as AssistantTransportCommand),
     ).toThrow(message);
+  });
+});
+
+describe('assistant transport history', () => {
+  it('copies the settled turns of each thread of a remote thread list to its history', async () => {
+    recordRequests(
+      () =>
+        new Response(
+          'aui-state:[{"type":"set","path":["messages"],"value":[' +
+            '{"id":"u","role":"user","text":"hello"},' +
+            '{"id":"a","role":"assistant","text":"hi"}]}]\n',
+        ),
+    );
+    const copies: { thread: string; ids: readonly string[] }[] = [];
+    const { assistant } = await render(
+      provideRemoteThreadListRuntime({
+        adapter: makeAdapter(),
+        runtime: () => [
+          provideRuntimeAdapters(() => {
+            const thread = inject(NXA_REMOTE_THREAD_ITEM)!.getState().id;
+            return {
+              history: {
+                load: async () => ({ messages: [] }),
+                append: async () => undefined,
+                unstable_copy: async (_branch, ids) => void copies.push({ thread, ids }),
+              },
+            };
+          }),
+          provideAssistantTransportRuntime(
+            transportOptions<ChatState>({ initialState: {}, converter: messagesConverter }),
+          ),
+        ],
+      }),
+    );
+    const thread = assistant.threads.mainItem.getState().id;
+
+    void assistant.thread.append('hello');
+
+    await waitFor(() => expect(copies).toEqual([{ thread, ids: ['u', 'a'] }]));
   });
 });

@@ -101,8 +101,9 @@ function warnAboutFrameworkAdapters(adapter: RemoteThreadListAdapter) {
   if (adapter.unstable_Provider !== undefined || adapter.unstable_useAdapters !== undefined) {
     console.warn(
       '[ngx-assistant] provideRemoteThreadListRuntime ignores unstable_Provider and ' +
-        'unstable_useAdapters on the adapter: pass per-thread adapters in the runtime options, ' +
-        'using NXA_REMOTE_THREAD_ITEM to know the thread.',
+        'unstable_useAdapters on the adapter: pass per-thread adapters with ' +
+        'provideRuntimeAdapters in the runtime providers, using NXA_REMOTE_THREAD_ITEM to know ' +
+        'the thread.',
     );
   }
 }
