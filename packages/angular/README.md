@@ -109,12 +109,36 @@ providers: [
 
 Model context registered on the list runtime, tools and instructions included, reaches the request
 of every thread: the thread injector holds the list's adapters as `NXA_RUNTIME_ADAPTERS`, which the
-local, data stream and external store runtimes read. It also holds the thread's list item as
-`NXA_REMOTE_THREAD_ITEM`, so a runtime factory can build a history adapter for that thread; the
-adapter's `unstable_Provider` and `unstable_useAdapters` are ignored. With
-`threadId`, the list shows the thread with that remote id, or a new thread for `undefined`, and
-`onThreadIdChange` reports the switches the user makes, not those made through `threadId`. A
-failed list load is retried when the browser comes back online or the page becomes visible.
+local, data stream, external store and assistant transport runtimes read. It also holds the thread's
+list item as `NXA_REMOTE_THREAD_ITEM`, so a runtime factory can build adapters for that thread; the
+adapter's `unstable_Provider` and `unstable_useAdapters` are ignored. With `threadId`, the list
+shows the thread with that remote id, or a new thread for `undefined`, and `onThreadIdChange`
+reports the switches the user makes, not those made through `threadId`. A failed list load is
+retried when the browser comes back online or the page becomes visible.
+
+`provideRuntimeAdapters(adapters)` hands history, attachment and feedback adapters to the runtime
+providers of its injector and of those below it, over the adapters of an outer
+`provideRuntimeAdapters`; a runtime's own adapters apply over both. `adapters` can be a factory run
+in the injection context, so among the `runtime` providers of a remote thread list it builds the
+adapters of each thread. The local and data stream runtimes load and append their messages through
+the history adapter. The external store and assistant transport runtimes keep their messages in a
+store: they take the feedback adapter when the store brings none, never the attachment adapter, and
+copy each settled turn to a history adapter that has `unstable_copy`, naming the messages that are
+new or changed, unless the store sets `unstable_persistsHistory` or runs its own thread list. Tool
+interactions recorded on their messages go into that copy, unless the store records them itself
+(`unstable_onRecordToolInteraction`). Within one injector the last `provideRuntimeAdapters` wins.
+
+```ts
+provideRemoteThreadListRuntime({
+  adapter: inject(ThreadsAdapter),
+  runtime: () => [
+    provideRuntimeAdapters(() => ({
+      history: inject(HistoryStore).adapterFor(inject(NXA_REMOTE_THREAD_ITEM)!),
+    })),
+    provideAssistantTransportRuntime({ api: '/api/agent', initialState, converter }),
+  ],
+});
+```
 
 `provideAssistantTransportRuntime(options)` (experimental) drives an agent on your server, written
 in any language. The browser sends commands, `add-message`, `add-tool-result` or your own, together
@@ -154,7 +178,8 @@ loading, before the live ones.
 
 Every request carries the thread's remote id as `threadId`. Threads live in memory by default; to
 persist them, return `provideAssistantTransportRuntime(...)` as the `runtime` of
-`provideRemoteThreadListRuntime`, where it becomes the runtime of each thread.
+`provideRemoteThreadListRuntime`, where it becomes the runtime of each thread, and add
+`provideRuntimeAdapters` with a history adapter to keep a copy of its settled turns.
 
 In components, `injectAssistantTransportState(selector?)` reads the agent state of the thread the
 runtime shows as a `Signal`, and `injectAssistantTransportSendCommand()` returns a function that
