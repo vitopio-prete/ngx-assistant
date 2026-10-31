@@ -167,15 +167,101 @@ nxa-demo-root {
 .main {
   min-width: 0;
   height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.backend-note {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .chat {
   display: block;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
-.chat[hidden] {
+/* Model picker */
+
+.model-picker {
+  position: relative;
+}
+
+.model-trigger {
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.model-effort {
+  color: var(--muted);
+  font-weight: normal;
+}
+
+.model-content {
+  position: absolute;
+  z-index: 1;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 240px;
+  padding: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+}
+
+.model-content[hidden] {
   display: none;
+}
+
+.model-item {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.model-item span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.model-item[data-highlighted] {
+  background: var(--panel);
+}
+
+.model-item[data-selected] strong::after {
+  content: ' ✓';
+}
+
+.model-efforts {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.model-effort-item {
+  flex: 1;
+  padding: 2px 8px;
+}
+
+.model-effort-item[aria-checked='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
 }
 
 .thread {
@@ -248,6 +334,43 @@ nxa-demo-root {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.reasoning {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Tool calls */
+
+.tool-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.tool-value {
+  color: var(--muted);
+}
+
+.tool-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.tool-outcome {
+  font-weight: 600;
+}
+
+.tool-card[data-answer='denied'] .tool-outcome {
+  color: var(--error);
 }
 
 .typing {
