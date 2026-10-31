@@ -31,9 +31,6 @@ import { EmailApproval, ToolFallback, WeatherCard } from './tool-cards';
           api: '/api/chat',
           // Lets the backend tell a regenerated reply from a new message.
           sendExtraMessageFields: true,
-          // Each reply counts its UI message stream steps (`start` and every `start-step`); an
-          // answered tool call only resumes the run while the count stays under this limit.
-          maxSteps: 10,
           adapters: { attachments: demoAttachments() },
         }),
       ],
