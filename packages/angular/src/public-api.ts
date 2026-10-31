@@ -21,3 +21,5 @@ export * from './lib/runtime-adapters';
 export * from './lib/remote-thread-list';
 export * from './lib/tools';
 export * from './lib/assistant-transport';
+export * from './lib/model-context';
+export * from './lib/model-picker';

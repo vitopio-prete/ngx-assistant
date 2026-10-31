@@ -797,6 +797,131 @@ options, the confirmation step and the error belong to the pending request: they
 another request arrives. The controls are also disabled when the thread cannot answer tool calls or
 a voice session holds it.
 
+## Model context
+
+What the model gets on every run of a runtime: tools, instructions and config. Each helper runs in
+an injection context (a component, a directive, a service), registers on the nearest runtime and is
+removed when its injector is destroyed. Registered on a thread list, it reaches every thread.
+
+```ts
+import {
+  injectAssistantContext,
+  injectAssistantInstructions,
+  injectAssistantTool,
+  injectModelContext,
+} from '@ngx-assistant/angular';
+
+@Component({/* ... */})
+export class WeatherPanel {
+  readonly city = signal('Rome');
+
+  constructor() {
+    injectAssistantTool({
+      toolName: 'get_weather',
+      description: 'Get the weather of a city.',
+      parameters: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] },
+      execute: async ({ city }) => fetchWeather(city as string),
+      render: WeatherCard,
+    });
+    injectAssistantInstructions('Answer in Italian.');
+    injectAssistantContext({ getContext: () => `The user is looking at ${this.city()}.` });
+  }
+}
+```
+
+`injectAssistantTool(tool)` adds a tool. With `execute` it runs in the browser and its result goes
+back to the model; without it, the call waits for the UI to answer it with `addResult`. `render` is
+registered as the UI of the tool on the tool UI registry of that runtime, so it applies wherever the
+runtime's messages render, and never reaches the model. `injectAssistantInstructions(text)` adds to the system prompt, and
+takes `{ instruction, disabled }`. `injectAssistantContext({ getContext })` adds to the system
+prompt the text that `getContext` returns on every send.
+
+The three helpers also take a function that reads signals, such as `() => ({ ...tool, description:
+description() })`: the runtime always gets the latest value and is notified (`modelContextUpdate`)
+when it changes. `injectModelContext()` gives the `modelName` and the sorted `toolNames` of the
+model context of the nearest thread as a signal.
+
+`provideDataStreamRuntime(...)` sends the system prompt, the tools as JSON Schema and the config
+(`modelName` and the like) in the request body, and so does `provideAssistantTransportRuntime(...)`.
+A local runtime hands the model context to its chat model.
+
+## Model picker primitives
+
+Headless model picker: behavior, ARIA and `data-*` state, no styles and no positioning. The chosen
+model goes in the model context of the nearest runtime as `config.modelName`, and the chosen effort
+as `config.reasoningEffort` when the model supports it.
+
+```ts
+import {
+  NxaModelPicker,
+  NxaModelPickerContent,
+  NxaModelPickerEffort,
+  NxaModelPickerEffortItem,
+  NxaModelPickerItem,
+  NxaModelPickerSearch,
+  NxaModelPickerTrigger,
+  type ModelOption,
+} from '@ngx-assistant/angular';
+
+readonly models: ModelOption[] = [
+  { id: 'small', name: 'Small', keywords: ['fast'] },
+  { id: 'large', name: 'Large', efforts: true },
+];
+```
+
+<!-- prettier-ignore -->
+```html
+<div nxaModelPicker #picker="nxaModelPicker" [models]="models" [(value)]="model">
+  <button nxaModelPickerTrigger>{{ picker.selectedModel()?.name ?? 'Select model' }}</button>
+  <div nxaModelPickerContent>
+    <input nxaModelPickerSearch placeholder="Search models" />
+    <div nxaModelPickerList aria-label="Models">
+      @for (option of picker.filteredModels(); track option.id) {
+        <div [nxaModelPickerItem]="option">{{ option.name }}</div>
+      }
+    </div>
+    @if (picker.filteredModels().length === 0) {
+      <p>No models</p>
+    }
+    <div nxaModelPickerEffort aria-label="Reasoning effort">
+      @for (level of picker.efforts() ?? []; track level.id) {
+        <button [nxaModelPickerEffortItem]="level.id">{{ level.name }}</button>
+      }
+    </div>
+  </div>
+</div>
+```
+
+| Directive                          | Behavior                                                                                        |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `[nxaModelPicker]`                 | Holds `models`, the two-way `value`, `effort` and `open`, and writes the choice to the context. |
+| `button[nxaModelPickerTrigger]`    | Select-only combobox: toggles on click, opens with the arrows, drives the open list.            |
+| `[nxaModelPickerContent]`          | What opens: `hidden` while closed; holds the list, the search and the effort levels.            |
+| `[nxaModelPickerList]`             | `role="listbox"` with the options only.                                                         |
+| `[nxaModelPickerItem]`             | `role="option"` for a model: a click picks it and closes; the pointer highlights it.            |
+| `input[nxaModelPickerSearch]`      | Filters `filteredModels()` by id, name and keywords; takes the focus when the content opens.    |
+| `[nxaModelPickerEffort]`           | `role="radiogroup"` of the effort levels, `hidden` when the chosen model has none.              |
+| `button[nxaModelPickerEffortItem]` | `role="radio"` for a level: a click chooses it; the arrows move between levels.                 |
+
+Without `value`, the first model is chosen. `efforts: true` gives the low, medium and high levels;
+the chosen effort stays across model switches and `activeEffort()` is the one that applies to the
+chosen model. Through `#picker="nxaModelPicker"` (or `injectModelPicker()` in a custom part):
+`selectedModel()`, `efforts()`, `activeEffort()`, `filteredModels()`, `highlightedId()`, `query`,
+and the methods `select`, `setEffort`, `show`, `close` and `toggle`.
+
+Open, the trigger and the search take ArrowDown, ArrowUp, Home and End to move over the enabled
+options (`aria-activedescendant`, `data-highlighted`) and Enter to pick; Space also picks on the
+trigger. Escape closes with the focus back on the trigger and does not reach the elements around the
+picker (a dialog keeps it for when the picker is closed). Keys are ignored while an IME composes.
+Tab moves through the content as usual: the picker closes when the focus or a pointer down lands
+outside it. A pointer down on a part of the content that takes no focus keeps the focus where it
+is. Opening, through `show()` or the `open` binding, starts on the chosen model; closing clears the
+search. Options carry `aria-selected`,
+`data-selected`, and `aria-disabled` with `data-disabled` for a model that cannot be picked; the
+root, the trigger and the content carry `data-state="open|closed"`, the levels
+`data-state="checked|unchecked"` and `aria-checked`. Without a runtime the picker only keeps the
+state.
+
 ## Build and test
 
 ```bash

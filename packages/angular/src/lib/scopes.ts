@@ -11,7 +11,11 @@ import type {
 } from '@ngx-assistant/engine';
 import { NXA_TOOL_APPROVAL } from './tools/approval/approval-state';
 import { NXA_TOOL_CALL, createToolCall } from './tools/tool-call';
-import { TOOL_UI_REGISTRY_PROVIDER } from './tools/tool-ui-registry';
+import {
+  NXA_ASSISTANT_TOOL_UI_REGISTRY,
+  NXA_TOOL_UI_REGISTRY,
+  TOOL_UI_REGISTRY_PROVIDER,
+} from './tools/tool-ui-registry';
 
 // Each scope is a token in the injector tree. A scope provider sets its own token, derives the
 // tokens it implies (a message brings its edit composer) and clears the narrower ones, so a
@@ -72,6 +76,7 @@ export function provideAssistantScope(factory: () => AssistantRuntime): Provider
     { provide: NXA_THREAD, useFactory: () => inject(NXA_ASSISTANT)!.thread },
     { provide: NXA_COMPOSER, useFactory: () => inject(NXA_THREAD)!.composer },
     TOOL_UI_REGISTRY_PROVIDER,
+    { provide: NXA_ASSISTANT_TOOL_UI_REGISTRY, useFactory: () => inject(NXA_TOOL_UI_REGISTRY) },
     ...cleared(
       NXA_MESSAGE,
       NXA_MESSAGE_UI,

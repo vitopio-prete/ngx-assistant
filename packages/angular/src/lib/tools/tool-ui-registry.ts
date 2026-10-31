@@ -88,6 +88,15 @@ export class ToolUiRegistry {
 
 export const NXA_TOOL_UI_REGISTRY = new InjectionToken<ToolUiRegistry>('NXA_TOOL_UI_REGISTRY');
 
+/**
+ * The registry of the level of the nearest assistant scope, set by every assistant scope. A tool
+ * registered with the model context of a runtime puts its UI there, so the UI applies wherever
+ * that runtime's messages render. Not part of the public API.
+ */
+export const NXA_ASSISTANT_TOOL_UI_REGISTRY = new InjectionToken<ToolUiRegistry>(
+  'NXA_ASSISTANT_TOOL_UI_REGISTRY',
+);
+
 const NXA_TOOL_UI_DECLARATIONS = new InjectionToken<readonly ToolUiDeclaration[]>(
   'NXA_TOOL_UI_DECLARATIONS',
 );
