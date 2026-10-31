@@ -9,6 +9,7 @@ import {
 import {
   AssistantMessageAccumulator,
   DataStreamDecoder,
+  type AssistantStreamChunk,
   toToolsJSONSchema,
   UIMessageStreamDecoder,
   unstable_toolResultStream,
@@ -69,6 +70,36 @@ const invokeCallback = <TArgs extends readonly unknown[]>(
 const toError = (error: unknown) => (error instanceof Error ? error : new Error(String(error)));
 
 const isAbortError = (error: unknown) => error instanceof Error && error.name === 'AbortError';
+
+/**
+ * The UI message stream opens a step for its `start` chunk and again for the `start-step` that
+ * follows, which would count every reply twice against `maxSteps`. The first step start is held
+ * until content arrives: a step start before any content replaces it. Data chunks, which belong to
+ * no step, pass through meanwhile.
+ */
+export const mergeAdjacentStepStarts = () => {
+  let held: AssistantStreamChunk | undefined;
+  let seenStepStart = false;
+  return new TransformStream<AssistantStreamChunk, AssistantStreamChunk>({
+    transform(chunk, controller) {
+      if (chunk.type === 'step-start') {
+        if (!seenStepStart) {
+          seenStepStart = true;
+          held = chunk;
+          return;
+        }
+        held = undefined;
+      } else if (held && chunk.type !== 'data') {
+        controller.enqueue(held);
+        held = undefined;
+      }
+      controller.enqueue(chunk);
+    },
+    flush(controller) {
+      if (held) controller.enqueue(held);
+    },
+  });
+};
 
 let didWarnProtocolFallback = false;
 
@@ -182,8 +213,10 @@ export class DataStreamAdapter implements ChatModelAdapter {
             })
           : new DataStreamDecoder({ maxLineLength: options.maxStreamLineLength });
 
-      const stream = response.body
-        .pipeThrough(decoder)
+      const decoded = response.body.pipeThrough(decoder);
+      const stream = (
+        protocol === 'ui-message-stream' ? decoded.pipeThrough(mergeAdjacentStepStarts()) : decoded
+      )
         .pipeThrough(
           unstable_toolResultStream(context.tools, abortSignal, () => {
             throw new Error('Tool interrupt is not supported in data stream runtime');

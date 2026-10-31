@@ -417,4 +417,196 @@ describe('provideDataStreamRuntime', () => {
     );
     injector.destroy();
   });
+
+  describe('step count', () => {
+    // A reply as the AI SDK streams it: `start` opens the message, `start-step` each step.
+    const step = (chunks: Chunk[], finishReason = 'stop'): Chunk[] => [
+      { type: 'start-step' },
+      ...chunks,
+      { type: 'finish-step', finishReason },
+    ];
+    const reply = (steps: Chunk[][], finishReason = 'stop'): Chunk[] => [
+      { type: 'start', messageId: 'reply' },
+      ...steps.flat(),
+      { type: 'finish', finishReason },
+    ];
+    const text = (id: string, delta: string): Chunk[] => [
+      { type: 'text-start', id },
+      { type: 'text-delta', id, delta },
+      { type: 'text-end', id },
+    ];
+    const stepsOf = (assistant: AssistantRuntime) => lastAssistant(assistant)!.metadata.steps;
+
+    it('counts one step for a reply that opens with start and start-step', async () => {
+      stubFetch(() => uiMessageStream(reply([step(text('t', 'Hi'))])));
+      const { injector, assistant } = setup({ api: '/api/chat' });
+
+      send(assistant, 'Hi');
+      await waitForStatus(assistant, 'complete');
+
+      expect(stepsOf(assistant)).toEqual([
+        expect.objectContaining({ state: 'finished', messageId: 'reply', finishReason: 'stop' }),
+      ]);
+      injector.destroy();
+    });
+
+    it('counts each start-step of a reply with several steps', async () => {
+      stubFetch(() =>
+        uiMessageStream(reply([step(text('a', 'one'), 'tool-calls'), step(text('b', 'two'))])),
+      );
+      const { injector, assistant } = setup({ api: '/api/chat' });
+
+      send(assistant, 'Hi');
+      await waitForStatus(assistant, 'complete');
+
+      expect(stepsOf(assistant)).toEqual([
+        expect.objectContaining({ state: 'finished', finishReason: 'tool-calls' }),
+        expect.objectContaining({ state: 'finished', finishReason: 'stop' }),
+      ]);
+      injector.destroy();
+    });
+
+    it('still counts one step for a reply without start-step', async () => {
+      stubFetch(() => uiMessageStream(textReply('Hi')));
+      const { injector, assistant } = setup({ api: '/api/chat' });
+
+      send(assistant, 'Hi');
+      await waitForStatus(assistant, 'complete');
+
+      expect(stepsOf(assistant)).toHaveLength(1);
+      injector.destroy();
+    });
+
+    it('keeps counting data stream steps as they come', async () => {
+      stubFetch(
+        () =>
+          new Response(
+            'f:{"messageId":"a"}\n0:"one"\ne:{"finishReason":"tool-calls","usage":{"promptTokens":0,"completionTokens":0},"isContinued":false}\n' +
+              'f:{"messageId":"b"}\n0:"two"\ne:{"finishReason":"stop","usage":{"promptTokens":0,"completionTokens":0},"isContinued":false}\n' +
+              'd:{"finishReason":"stop","usage":{"promptTokens":0,"completionTokens":0}}\n',
+            { headers: { 'x-vercel-ai-data-stream': 'v1' } },
+          ),
+      );
+      const { injector, assistant } = setup({ api: '/api/chat' });
+
+      send(assistant, 'Hi');
+      await waitForStatus(assistant, 'complete');
+
+      expect(stepsOf(assistant).map((s) => s.messageId)).toEqual(['a', 'b']);
+      injector.destroy();
+    });
+
+    it('resumes after addResult with the default maxSteps', async () => {
+      const { bodies } = stubFetch(
+        () =>
+          uiMessageStream(
+            reply(
+              [
+                step(
+                  [
+                    { type: 'tool-input-start', toolCallId: 'call-1', toolName: 'confirm' },
+                    {
+                      type: 'tool-input-available',
+                      toolCallId: 'call-1',
+                      toolName: 'confirm',
+                      input: { action: 'delete' },
+                    },
+                  ],
+                  'tool-calls',
+                ),
+              ],
+              'tool-calls',
+            ),
+          ),
+        () => uiMessageStream(reply([step(text('t', 'Deleted'))])),
+      );
+      const { injector, assistant } = setup({ api: '/api/chat' });
+
+      send(assistant, 'Delete it');
+      await waitForStatus(assistant, 'requires-action');
+      assistant.thread
+        .getMessageById(lastAssistant(assistant)!.id)
+        .getMessagePartByToolCallId('call-1')
+        .addToolResult({ approved: true });
+
+      await vi.waitFor(() => expect(textOf(lastAssistant(assistant))).toContain('Deleted'));
+      await waitForStatus(assistant, 'complete');
+      expect(bodies()).toHaveLength(2);
+      expect(stepsOf(assistant)).toHaveLength(2);
+      injector.destroy();
+    });
+
+    it('counts a data part sent between start and start-step as no step', async () => {
+      stubFetch(() =>
+        uiMessageStream([
+          { type: 'start', messageId: 'reply' },
+          { type: 'data-progress', data: { stage: 'thinking' } },
+          ...step(text('t', 'Hi')),
+          { type: 'finish', finishReason: 'stop' },
+        ]),
+      );
+      const { injector, assistant } = setup({ api: '/api/chat' });
+
+      send(assistant, 'Hi');
+      await waitForStatus(assistant, 'complete');
+
+      expect(stepsOf(assistant)).toHaveLength(1);
+      injector.destroy();
+    });
+
+    it('counts the step of a reply that fails halfway', async () => {
+      stubFetch(() =>
+        uiMessageStream([
+          { type: 'start', messageId: 'reply' },
+          { type: 'start-step' },
+          ...text('t', 'Hal'),
+          { type: 'error', errorText: 'boom' },
+        ]),
+      );
+      const { injector, assistant } = setup({ api: '/api/chat', onError: () => undefined });
+
+      send(assistant, 'Hi');
+      await waitForStatus(assistant, 'incomplete');
+
+      expect(stepsOf(assistant)).toHaveLength(1);
+      injector.destroy();
+    });
+
+    it('uses up the default maxSteps with a reply of two real steps', async () => {
+      const { bodies } = stubFetch(() =>
+        uiMessageStream(
+          reply(
+            [
+              step(text('a', 'Looking'), 'tool-calls'),
+              step(
+                [
+                  { type: 'tool-input-start', toolCallId: 'call-1', toolName: 'confirm' },
+                  {
+                    type: 'tool-input-available',
+                    toolCallId: 'call-1',
+                    toolName: 'confirm',
+                    input: {},
+                  },
+                ],
+                'tool-calls',
+              ),
+            ],
+            'tool-calls',
+          ),
+        ),
+      );
+      const { injector, assistant } = setup({ api: '/api/chat' });
+
+      send(assistant, 'Delete it');
+      await waitForStatus(assistant, 'requires-action');
+      assistant.thread
+        .getMessageById(lastAssistant(assistant)!.id)
+        .getMessagePartByToolCallId('call-1')
+        .addToolResult({ approved: true });
+
+      await waitForStatus(assistant, 'incomplete');
+      expect(bodies()).toHaveLength(1);
+      injector.destroy();
+    });
+  });
 });

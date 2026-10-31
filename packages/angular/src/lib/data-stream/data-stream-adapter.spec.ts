@@ -5,8 +5,10 @@ import type {
   ChatModelRunResult,
   ThreadMessage,
 } from '@ngx-assistant/engine';
+import type { AssistantStreamChunk } from 'assistant-stream';
 import {
   DataStreamAdapter,
+  mergeAdjacentStepStarts,
   resetProtocolFallbackWarning,
   type DataStreamAdapterOptions,
 } from './data-stream-adapter';
@@ -1085,5 +1087,68 @@ describe('DataStreamAdapter request state', () => {
 
   it('omits null state', async () => {
     await expect(runWithState(null)).resolves.not.toHaveProperty('state');
+  });
+});
+
+describe('mergeAdjacentStepStarts', () => {
+  const stepStart = (messageId: string) =>
+    ({ type: 'step-start', path: [], messageId }) as AssistantStreamChunk;
+  const data = { type: 'data', path: [], data: [{ name: 'x', data: 1 }] } as AssistantStreamChunk;
+  const partStart = {
+    type: 'part-start',
+    path: [],
+    part: { type: 'text' },
+  } as AssistantStreamChunk;
+  const stepFinish = {
+    type: 'step-finish',
+    path: [],
+    finishReason: 'stop',
+    isContinued: false,
+  } as unknown as AssistantStreamChunk;
+  const error = { type: 'error', path: [], error: 'boom' } as AssistantStreamChunk;
+
+  const run = async (chunks: AssistantStreamChunk[]) => {
+    const out: AssistantStreamChunk[] = [];
+    const readable = new ReadableStream<AssistantStreamChunk>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      },
+    }).pipeThrough(mergeAdjacentStepStarts());
+    for await (const chunk of readable as unknown as AsyncIterable<AssistantStreamChunk>) {
+      out.push(chunk);
+    }
+    return out;
+  };
+
+  it('keeps the second of the two step starts that open a reply', async () => {
+    expect(await run([stepStart('a'), stepStart('b'), partStart])).toEqual([
+      stepStart('b'),
+      partStart,
+    ]);
+  });
+
+  it('lets data through while the first step start is held', async () => {
+    expect(await run([stepStart('a'), data, stepStart('b'), partStart])).toEqual([
+      data,
+      stepStart('b'),
+      partStart,
+    ]);
+  });
+
+  it('keeps a lone step start, before content or at the end', async () => {
+    expect(await run([stepStart('a'), partStart])).toEqual([stepStart('a'), partStart]);
+    expect(await run([stepStart('a')])).toEqual([stepStart('a')]);
+  });
+
+  it('releases the held step start before an error or a step finish', async () => {
+    expect(await run([stepStart('a'), error])).toEqual([stepStart('a'), error]);
+    expect(await run([stepStart('a'), stepFinish])).toEqual([stepStart('a'), stepFinish]);
+  });
+
+  it('keeps every later step start, even an empty step', async () => {
+    expect(
+      await run([stepStart('a'), stepStart('b'), stepFinish, stepStart('c'), stepStart('d')]),
+    ).toEqual([stepStart('b'), stepFinish, stepStart('c'), stepStart('d')]);
   });
 });
