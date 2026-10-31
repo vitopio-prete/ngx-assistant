@@ -8,8 +8,7 @@
   },
   "dependencies": {
     "@ngx-assistant/angular": "workspace:*",
-    "@ngx-assistant/engine": "workspace:*",
-    "assistant-stream": "^0.3.53"
+    "@ngx-assistant/engine": "workspace:*"
   },
   "devDependencies": {
     "jsdom": "^30.0.0"

@@ -8,7 +8,7 @@ import type {
   ThreadListItemRuntime,
   ThreadMessage,
 } from '@ngx-assistant/engine';
-import { UIMessageStreamDecoder, type AssistantStream } from 'assistant-stream';
+import { titleStreamFromResponse } from '@ngx-assistant/angular';
 
 async function api(path: string, init?: RequestInit): Promise<Response> {
   const response = await fetch(`/api/${path}`, {
@@ -63,7 +63,7 @@ export const threadListAdapter: RemoteThreadListAdapter = {
   async delete(remoteId) {
     await send('DELETE', threadPath(remoteId));
   },
-  async generateTitle(remoteId, messages): Promise<AssistantStream> {
+  async generateTitle(remoteId, messages) {
     const response = await send('POST', `${threadPath(remoteId)}/title`, {
       messages: messages.map((m) => ({
         role: m.role,
@@ -71,7 +71,7 @@ export const threadListAdapter: RemoteThreadListAdapter = {
         attachments: m.attachments?.map((a) => a.name) ?? [],
       })),
     });
-    return response.body!.pipeThrough(new UIMessageStreamDecoder());
+    return titleStreamFromResponse(response);
   },
 };
 

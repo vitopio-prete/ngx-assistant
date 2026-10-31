@@ -93,9 +93,6 @@ importers:
       '@ngx-assistant/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      assistant-stream:
-        specifier: ^0.3.53
-        version: 0.3.54
     devDependencies:
       jsdom:
         specifier: ^30.0.0
