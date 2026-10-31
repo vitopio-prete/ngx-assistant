@@ -6,7 +6,10 @@ import {
   NxaMessageParts,
 } from '@ngx-assistant/angular';
 
-/** The text parts and the attachments of the message around it. */
+/**
+ * The attachments and the parts of the message around it: text, reasoning, and tool calls, which
+ * `*nxaMessageParts` renders with the tool UIs the app declares.
+ */
 @Component({
   selector: 'nxa-demo-message-content',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -25,6 +28,8 @@ import {
         @let p = part();
         @if (p.type === 'text') {
           <p class="text">{{ p.text }}</p>
+        } @else if (p.type === 'reasoning') {
+          <p class="reasoning">{{ p.text }}</p>
         }
       </ng-container>
     </div>

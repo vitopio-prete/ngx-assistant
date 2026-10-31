@@ -1,41 +1,46 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
-import { provideExternalStoreRuntime } from '@ngx-assistant/angular';
-import type { ExternalStoreAdapter } from '@ngx-assistant/engine';
+import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import {
+  NXA_REMOTE_THREAD_ITEM,
+  provideDataStreamRuntime,
+  provideRemoteThreadListRuntime,
+  provideRuntimeAdapters,
+  provideToolUi,
+} from '@ngx-assistant/angular';
+import { demoAttachments } from './attachments';
+import { threadHistory, threadListAdapter } from './backend-client';
 import { Chat } from './chat';
+import { ModelPicker } from './model-picker';
 import { ThreadSidebar } from './thread-sidebar';
-import { ThreadStore } from './thread-store';
+import { EmailApproval, ToolFallback, WeatherCard } from './tool-cards';
 
 /**
- * The demo shell. The thread list runs on an external store runtime that only knows the
- * conversations of `ThreadStore`; each conversation is a chat with its own local runtime, kept
- * alive while another one is shown, so it keeps its messages and branches.
+ * The demo shell. The conversations live on the backend (`/api/threads`): each one runs on its
+ * own runtime, which loads and saves its messages there and posts every run to `/api/chat`. The
+ * chat shows the current conversation; the model picked in the header applies to all of them.
  */
 @Component({
   selector: 'nxa-demo-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [Chat, ThreadSidebar],
+  imports: [Chat, ModelPicker, ThreadSidebar],
   providers: [
-    ThreadStore,
-    provideExternalStoreRuntime(() => {
-      const store = inject(ThreadStore);
-      return computed((): ExternalStoreAdapter => ({
-        messages: [],
-        // The conversations are written in their own chats, never in this thread.
-        onNew: async () => undefined,
-        adapters: {
-          threadList: {
-            threadId: store.mainId(),
-            threads: store.threads(),
-            archivedThreads: store.archived(),
-            onSwitchToNewThread: () => store.create(),
-            onSwitchToThread: (id: string) => store.switchTo(id),
-            onArchive: (id: string) => store.archive(id),
-            onUnarchive: (id: string) => store.unarchive(id),
-            onDelete: (id: string) => store.delete(id),
-          },
-        },
-      }));
+    provideRemoteThreadListRuntime({
+      adapter: threadListAdapter,
+      runtime: () => [
+        provideRuntimeAdapters(() => ({ history: threadHistory(inject(NXA_REMOTE_THREAD_ITEM)!) })),
+        provideDataStreamRuntime({
+          api: '/api/chat',
+          // Lets the backend tell a regenerated reply from a new message.
+          sendExtraMessageFields: true,
+          // Each reply counts its UI message stream steps (`start` and every `start-step`); an
+          // answered tool call only resumes the run while the count stays under this limit.
+          maxSteps: 10,
+          adapters: { attachments: demoAttachments() },
+        }),
+      ],
     }),
+    provideToolUi({ toolName: 'get_weather', component: WeatherCard }),
+    provideToolUi({ toolName: 'send_email', component: EmailApproval }),
+    provideToolUi({ fallback: ToolFallback }),
   ],
   template: `
     <aside class="sidebar">
@@ -43,12 +48,12 @@ import { ThreadStore } from './thread-store';
       <nxa-demo-thread-sidebar />
     </aside>
     <main class="main">
-      @for (id of store.ids(); track id) {
-        <nxa-demo-chat [threadId]="id" [hidden]="id !== store.mainId()" />
-      }
+      <header class="header">
+        <nxa-demo-model-picker />
+        <span class="backend-note">Backend simulated in the browser</span>
+      </header>
+      <nxa-demo-chat />
     </main>
   `,
 })
-export class App {
-  protected readonly store = inject(ThreadStore);
-}
+export class App {}

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
 import {
   NxaThreadListItemArchive,
   NxaThreadListItemDelete,
@@ -9,8 +9,9 @@ import {
   NxaThreadListItemUnarchive,
   NxaThreadListNew,
   NxaThreadListRoot,
+  fromRuntime,
+  injectAssistant,
 } from '@ngx-assistant/angular';
-import { ThreadStore } from './thread-store';
 
 /** The list of conversations: switch, start, archive, restore and delete them. */
 @Component({
@@ -44,7 +45,7 @@ import { ThreadStore } from './thread-store';
         </button>
       </div>
 
-      @if (store.archived().length) {
+      @if (hasArchived()) {
         <details class="archived">
           <summary>Archived</summary>
           <div
@@ -79,5 +80,8 @@ import { ThreadStore } from './thread-store';
   `,
 })
 export class ThreadSidebar {
-  protected readonly store = inject(ThreadStore);
+  protected readonly hasArchived = fromRuntime(
+    injectAssistant().threads,
+    (s) => s.archivedThreadIds.length > 0,
+  );
 }
