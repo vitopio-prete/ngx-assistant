@@ -7,7 +7,12 @@
  * Every token falls back to the variable of the same name of a shadcn or spartan theme
  * (--background, --primary...), so the components follow such a theme when the app has one.
  * Change a token here, or set it on any element, to restyle the components below it.
+ *
+ * The menus and the assistant modal open in the overlay of @angular/cdk, whose layout comes
+ * from the stylesheet imported below.
  */
+
+@import '@angular/cdk/overlay-prebuilt.css';
 
 :root {
   --nxa-background: var(--background, oklch(1 0 0));

@@ -5,11 +5,12 @@
   "description": "Styled ngx-assistant components, copied into the app that uses them",
   "license": "MIT",
   "dependencies": {
+    "@angular/cdk": "^22.2.5",
     "@ngx-assistant/angular": "workspace:*",
+    "@ngx-assistant/engine": "workspace:*",
     "@tailwindcss/postcss": "^4.3.3",
     "markdown-it": "^15.0.3",
-    "tailwindcss": "^4.3.3",
-    "@ngx-assistant/engine": "workspace:*"
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "axe-core": "^4.14.0"

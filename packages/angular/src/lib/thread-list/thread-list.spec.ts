@@ -19,6 +19,7 @@ import type {
 import { provideExternalStoreRuntime } from '../external-store-runtime';
 import { provideLocalRuntime } from '../local-runtime';
 import { NXA_ASSISTANT, NXA_THREAD_LIST, injectThread, injectThreadListItem } from '../scopes';
+import { NxaThreadListItemById } from './thread-list-item-by-id';
 import { NxaThreadListItems } from './thread-list-items';
 import {
   NxaThreadListItemArchive,
@@ -685,5 +686,89 @@ describe('scopes', () => {
       expect(TestBed.inject(Injector).get(NXA_THREAD_LIST)!.getState().mainThreadId).toBe('third'),
     );
     expect(thread.getState().threadId).toBe('third');
+  });
+});
+
+describe('*nxaThreadListItemById', () => {
+  @Component({
+    changeDetection: ChangeDetectionStrategy.OnPush,
+    imports: [
+      NxaThreadListItemById,
+      NxaThreadListItemRoot,
+      NxaThreadListItemTrigger,
+      NxaThreadListItemTitle,
+      NxaThreadListItemArchive,
+      InitialTitle,
+    ],
+    template: `
+      @for (id of order(); track id) {
+        <div *nxaThreadListItemById="id" nxaThreadListItemRoot class="item" [attr.data-id]="id">
+          <button nxaThreadListItemTrigger class="trigger">
+            <span nxaThreadListItemTitle class="title" fallback="New chat"></span>
+          </button>
+          <nxa-test-initial class="initial" />
+          <button nxaThreadListItemArchive class="archive">Archive</button>
+        </div>
+      }
+      <div *nxaThreadListItemById="single()" class="single">
+        <span nxaThreadListItemTitle class="title"></span>
+        <nxa-test-initial class="initial" />
+      </div>
+    `,
+  })
+  class ById {
+    readonly order = signal(['third', 'first']);
+    readonly single = signal('second');
+  }
+
+  it('renders the scope of each thread in the order given', async () => {
+    const store = createStore();
+    const fixture = await mount([store.provider], ById);
+
+    expect(ids(fixture)).toEqual(['third', 'first']);
+    expect(all(fixture, '.item .title').map((title) => title.textContent)).toEqual([
+      'third',
+      'first',
+    ]);
+    expect(all(fixture, '.item[data-active]').map((item) => item.dataset['id'])).toEqual(['first']);
+
+    one(fixture, '.item[data-id="third"] .trigger').click();
+    await until(fixture, () => expect(store.onSwitchToThread).toHaveBeenCalledWith('third'));
+  });
+
+  it('renders the new thread when the id changes', async () => {
+    const store = createStore();
+    const fixture = await mount([store.provider], ById);
+    expect(one<HTMLElement>(fixture, '.single .initial').textContent).toBe('second');
+
+    fixture.componentInstance.single.set('third');
+    await until(fixture, () =>
+      expect(one<HTMLElement>(fixture, '.single .initial').textContent).toBe('third'),
+    );
+  });
+
+  it('keeps the scope of an archived thread and drops a deleted one', async () => {
+    const store = createStore();
+    const fixture = await mount([store.provider], ById);
+
+    one(fixture, '.item[data-id="third"] .archive').click();
+    await until(fixture, () => expect(store.onArchive).toHaveBeenCalledWith('third'));
+    await fixture.whenStable();
+    expect(ids(fixture)).toEqual(['third', 'first']);
+
+    store.onDelete('third');
+    await until(fixture, () => expect(ids(fixture)).toEqual(['first']));
+  });
+
+  it('renders nothing for an unknown id until the thread arrives', async () => {
+    const store = createStore();
+    const fixture = await mount([store.provider], ById);
+    fixture.componentInstance.single.set('later');
+    await until(fixture, () => expect(all(fixture, '.single')).toHaveLength(0));
+
+    store.threads.update((list) => [...list, regular('later', 'Later')]);
+    await until(fixture, () =>
+      expect(one<HTMLElement>(fixture, '.single .title').textContent).toBe('Later'),
+    );
   });
 });
