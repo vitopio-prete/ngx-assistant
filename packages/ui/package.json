@@ -1,0 +1,17 @@
+{
+  "name": "@ngx-assistant/ui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Styled ngx-assistant components, copied into the app that uses them",
+  "license": "MIT",
+  "dependencies": {
+    "@ngx-assistant/angular": "workspace:*",
+    "@tailwindcss/postcss": "^4.3.3",
+    "markdown-it": "^15.0.3",
+    "tailwindcss": "^4.3.3",
+    "@ngx-assistant/engine": "workspace:*"
+  },
+  "devDependencies": {
+    "axe-core": "^4.14.0"
+  }
+}

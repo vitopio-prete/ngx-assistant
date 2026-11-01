@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "outDir": "../../out-tsc/ui",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": [],
+    "paths": {
+      "@ngx-assistant/angular": ["../angular/src/public-api.ts"]
+    }
+  },
+  "angularCompilerOptions": {
+    "strictTemplates": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.spec.ts", "src/testing/**"]
+}
