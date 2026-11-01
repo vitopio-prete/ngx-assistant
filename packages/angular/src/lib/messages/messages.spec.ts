@@ -554,7 +554,9 @@ function rootHost(store: Store) {
     providers: [store.provider],
     template: `
       @if (show()) {
-        <article *nxaMessages="let message" nxaMessageRoot><nxa-test-ui /></article>
+        <article *nxaMessages="let message" nxaMessageRoot>
+          <nxa-test-ui /><button class="a">A</button><button class="b">B</button>
+        </article>
       }
     `,
   })
@@ -615,6 +617,72 @@ describe('nxaMessageRoot', () => {
   });
 });
 
+/** Moves the focus as a Tab would, so that it is a keyboard focus (`:focus-visible`). */
+async function tabTo(fixture: ComponentFixture<unknown>, element: HTMLElement) {
+  document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+  element.focus();
+  await settle(fixture);
+}
+
+describe('nxaMessageRoot focus', () => {
+  it('tracks the keyboard focus inside the message', async () => {
+    const store = createStore([text('u0', 'hello'), text('u1', 'again')]);
+    const fixture = render(rootHost(store));
+    await settle(fixture);
+    const [first, second] = rows(fixture, 'article');
+
+    await tabTo(fixture, first!.querySelector<HTMLElement>('.a')!);
+    expect(uiOf(fixture, 0).isFocusWithin()).toBe(true);
+    expect(first!.hasAttribute('data-nxa-focus-within')).toBe(true);
+
+    // Within the message the focus stays inside.
+    await tabTo(fixture, first!.querySelector<HTMLElement>('.b')!);
+    expect(uiOf(fixture, 0).isFocusWithin()).toBe(true);
+
+    await tabTo(fixture, second!.querySelector<HTMLElement>('.a')!);
+    expect(uiOf(fixture, 0).isFocusWithin()).toBe(false);
+    expect(first!.hasAttribute('data-nxa-focus-within')).toBe(false);
+    expect(uiOf(fixture, 1).isFocusWithin()).toBe(true);
+
+    (document.activeElement as HTMLElement).blur();
+    await settle(fixture);
+    expect(uiOf(fixture, 1).isFocusWithin()).toBe(false);
+  });
+
+  it('starts focused when the keyboard focus is already inside it', async () => {
+    // An element that took the focus before the first render (such as an autofocused one).
+    vi.spyOn(document, 'activeElement', 'get').mockImplementation(() =>
+      document.querySelector('article .a'),
+    );
+    const matches = Element.prototype.matches;
+    vi.spyOn(Element.prototype, 'matches').mockImplementation(function (
+      this: Element,
+      selector: string,
+    ) {
+      return selector === ':focus-visible' || matches.call(this, selector);
+    });
+    const store = createStore([text('u0', 'hello')]);
+    const fixture = render(rootHost(store));
+    await settle(fixture);
+
+    expect(uiOf(fixture).isFocusWithin()).toBe(true);
+  });
+
+  it('clears the focus when it is destroyed', async () => {
+    const store = createStore([text('u0', 'hello')]);
+    const fixture = render(rootHost(store));
+    await settle(fixture);
+    const [article] = rows(fixture, 'article');
+    await tabTo(fixture, article!.querySelector<HTMLElement>('.a')!);
+    const ui = uiOf(fixture);
+    expect(ui.isFocusWithin()).toBe(true);
+
+    fixture.componentInstance.show.set(false);
+    await settle(fixture);
+    expect(ui.isFocusWithin()).toBe(false);
+  });
+});
+
 function ifHost(store: Store, when: NxaMessageIfConditions) {
   @Component({
     changeDetection: ChangeDetectionStrategy.OnPush,
@@ -622,7 +690,7 @@ function ifHost(store: Store, when: NxaMessageIfConditions) {
     providers: [store.provider],
     template: `
       <article *nxaMessages="let message" nxaMessageRoot [attr.data-id]="message().id">
-        <nxa-test-ui />
+        <nxa-test-ui /><button class="focus">focus</button>
         <span *nxaMessageIf="when(); else other" class="shown">{{ message().id }}</span>
         <ng-template #other
           ><span class="other">{{ message().id }}</span></ng-template
@@ -703,6 +771,19 @@ describe('nxaMessageIf', () => {
     expect(shown(fixture)).toEqual(['u0', 'u1']);
 
     rows(fixture, 'article')[0]!.dispatchEvent(new MouseEvent('mouseleave'));
+    await settle(fixture);
+    expect(shown(fixture)).toEqual(['u1']);
+  });
+
+  it('shows on a message that holds the keyboard focus', async () => {
+    const { fixture } = await renderIf({ lastOrHover: true }, [
+      text('u0', 'one'),
+      text('u1', 'two'),
+    ]);
+    await tabTo(fixture, rows(fixture, 'article')[0]!.querySelector<HTMLElement>('.focus')!);
+    expect(shown(fixture)).toEqual(['u0', 'u1']);
+
+    (document.activeElement as HTMLElement).blur();
     await settle(fixture);
     expect(shown(fixture)).toEqual(['u1']);
   });

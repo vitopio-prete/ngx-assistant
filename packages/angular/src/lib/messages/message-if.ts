@@ -16,7 +16,10 @@ export interface NxaMessageIfConditions {
   hasBranches?: boolean;
   /** The message was just copied (`injectMessageUi().isCopied`). */
   copied?: boolean;
-  /** `true`: the message is the last one or the pointer is over it. `false` is not checked. */
+  /**
+   * `true`: the message is the last one, the pointer is over it or the focus is inside it. `false`
+   * is not checked.
+   */
   lastOrHover?: boolean;
   last?: boolean;
   /** The message is being spoken. */
@@ -32,7 +35,7 @@ export interface NxaMessageIfConditions {
 const matches = (
   when: NxaMessageIfConditions,
   s: MessageState,
-  isHovering: boolean,
+  isActive: boolean,
   isCopied: boolean,
 ) => {
   const { role } = s;
@@ -42,7 +45,7 @@ const matches = (
   if (when.assistant !== undefined && when.assistant !== (role === 'assistant')) return false;
   if (when.system !== undefined && when.system !== (role === 'system')) return false;
 
-  if (when.lastOrHover === true && !isHovering && !s.isLast) return false;
+  if (when.lastOrHover === true && !isActive && !s.isLast) return false;
   if (when.last !== undefined && when.last !== s.isLast) return false;
 
   if (when.copied !== undefined && when.copied !== isCopied) return false;
@@ -84,7 +87,12 @@ export class NxaMessageIf {
       inject(ViewContainerRef),
       inject(TemplateRef),
       computed(() =>
-        matches(this.nxaMessageIf(), this.state(), this.ui.isHovering(), this.ui.isCopied()),
+        matches(
+          this.nxaMessageIf(),
+          this.state(),
+          this.ui.isHovering() || this.ui.isFocusWithin(),
+          this.ui.isCopied(),
+        ),
       ),
       this.nxaMessageIfElse,
     );
