@@ -226,7 +226,7 @@ Each runtime lives in a scope of the injector tree, and `inject*()` returns the 
 
 Inside a message scope `injectComposer()` returns the message's edit composer; the thread composer
 stays reachable as `injectThread().composer`. `injectMessageUi()` holds the view state of the message
-that the runtime does not keep, as writable signals: `isHovering` and `isCopied`. A missing scope throws, unless you pass
+that the runtime does not keep, as writable signals: `isHovering`, `isFocusWithin` and `isCopied`. A missing scope throws, unless you pass
 `{ optional: true }` to get `null`. A nested runtime provider isolates its subtree from the outer
 scopes.
 
@@ -419,7 +419,7 @@ import {
 | ------------------ | --------------------------------------------------------------------------------------------------------- |
 | `*nxaMessages`     | One row per message of the thread, each a message scope. Rows follow the message id.                      |
 | `*nxaMessageParts` | One row per content part of the nearest message, each a part scope. Tool calls follow their `toolCallId`. |
-| `[nxaMessageRoot]` | Sets `data-nxa-message-id`, used by the thread viewport, and tracks the hover.                            |
+| `[nxaMessageRoot]` | Sets `data-nxa-message-id`, used by the thread viewport, and tracks the hover and the keyboard focus.     |
 | `*nxaMessageIf`    | Renders while the message meets every condition given, the `else` template otherwise.                     |
 | `*nxaThreadIf`     | The same for the thread: `empty`, `running`, `disabled`.                                                  |
 | `*nxaThreadEmpty`  | Renders while the thread has no messages and is not loading them.                                         |
@@ -436,9 +436,72 @@ rendered by that component instead of the template (see [Tool UIs](#tool-uis)).
 
 `*nxaMessageIf` conditions, each checked only when given: `user`, `assistant`, `system`, `last`,
 `copied`, `speaking`, `hasAttachments`, `hasContent` (`true` or `false`); `hasBranches` and
-`lastOrHover` (`true`); `submittedFeedback` (`'positive'`, `'negative'` or `null`). With no
-condition it always renders. The hover and copied state belong to the message scope, so a nested
+`lastOrHover` (`true`: the last message, or one under the pointer or holding the keyboard focus);
+`submittedFeedback` (`'positive'`, `'negative'` or `null`). With no condition it always renders.
+The hover, focus and copied state belong to the message scope, so a nested
 `provideMessageScope(...)` starts with its own.
+
+`nxaMessageRoot` counts as keyboard focus a focus inside the message that the browser marks as
+`:focus-visible` (a Tab, not a click on a button), and sets `data-nxa-focus-within` meanwhile. Since
+`*nxaMessageIf` removes what it does not render, `lastOrHover` content is reachable from the
+keyboard only through something else focusable in the message; for actions, prefer
+`nxaActionBarRoot autohide`, which keeps them in the tab order.
+
+## Message part primitives
+
+Headless directives for the content of a part: its text revealed as it streams, an indicator while
+it runs, and the grouping of consecutive reasoning parts.
+
+```ts
+import {
+  NxaMessagePartByIndex,
+  NxaMessagePartInProgress,
+  NxaMessagePartText,
+  NxaReasoningGroup,
+} from '@ngx-assistant/angular';
+```
+
+```html
+<ng-container *nxaMessageParts="let part">
+  @if (part().type === 'text') {
+  <p nxaMessagePartText></p>
+  <span *nxaMessagePartInProgress aria-hidden="true">●</span>
+  } @else if (part().type === 'reasoning') {
+  <div *nxaReasoningGroup="let group">
+    <button type="button" [attr.aria-expanded]="group.open()" (click)="group.toggle()">
+      Reasoning
+    </button>
+    @if (group.open()) { @for (index of group.indices(); track index) {
+    <p *nxaMessagePartByIndex="index" nxaMessagePartText></p>
+    } }
+  </div>
+  }
+</ng-container>
+```
+
+| Directive or function       | Behavior                                                                                     |
+| --------------------------- | -------------------------------------------------------------------------------------------- |
+| `[nxaMessagePartText]`      | Writes the text of a `text` or `reasoning` part as its text content, with `data-nxa-status`. |
+| `*nxaMessagePartInProgress` | Renders while the part runs.                                                                 |
+| `*nxaReasoningGroup`        | On the first of a run of consecutive reasoning parts, renders once for the run.              |
+| `*nxaMessagePartByIndex`    | Renders in the scope of the part at an index of the message; nothing while there is none.    |
+| `injectSmoothText(smooth?)` | The revealed text and its status as a `Signal`, for text rendered another way (markdown).    |
+| `injectScrollLock(el, ms)`  | A function that holds the scroll of the nearest scrollable ancestor while a height animates. |
+
+`nxaMessagePartText` reveals a streaming text a few characters per frame (`smooth`, on by default):
+`smooth="false"` shows the text as it is, and an object tunes the reveal (`drainMs`, default 250;
+`maxCharIntervalMs`, default 5; `maxCharsPerFrame`; `minCommitMs`, the shortest time between two
+updates of the shown text). Under `prefers-reduced-motion: reduce` the text always shows as it is.
+A text that is no longer a continuation of the shown one starts the reveal again, and a part that
+ends before anything was shown appears at once. `data-nxa-status` is `running` until the text is
+shown in full, then the status of the part.
+
+`*nxaReasoningGroup` gives `let group`: `startIndex`, `endIndex`, `indices`, `streaming` (the model
+is still writing one of the parts) and `open` as signals, with `setOpen(open)` and `toggle()`. The
+group is open while the model reasons and closes once it moves on, until the user opens or closes
+it; then it keeps the user's choice. Every change of `open` first locks the scroll of the nearest
+scrollable ancestor for `lockMs` milliseconds (`*nxaReasoningGroup="let group; lockMs: 300"`,
+default 200), the length of a collapse animation, so that the thread does not jump.
 
 ## Action bar and branch picker
 
@@ -482,25 +545,38 @@ import {
 </article>
 ```
 
-| Directive                         | Behavior                                                                                                     |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `[nxaActionBarRoot]`              | Hides (`hidden`) and floats (`data-nxa-floating`) by `autohide`, `autohideFloat` and `hideWhenRunning`.      |
-| `button[nxaActionBarCopy]`        | Copies the message text, or the edit draft while editing. Sets `data-nxa-copied` and the message's `copied`. |
-| `button[nxaActionBarEdit]`        | Starts editing the message. Disabled while editing, or when the thread is disabled or cannot edit.           |
-| `button[nxaActionBarReload]`      | Regenerates an assistant message as a new branch. Disabled during a run and for other messages.              |
-| `[nxaBranchPickerRoot]`           | With `hideWhenSingleBranch`, carries `hidden` while the message has one branch.                              |
-| `button[nxaBranchPickerPrevious]` | Shows the previous branch. Disabled on the first one, and during a run unless the runtime allows switching.  |
-| `button[nxaBranchPickerNext]`     | Shows the next branch, with the same rules.                                                                  |
-| `[nxaBranchPickerNumber]`         | Writes the 1-based number of the branch shown.                                                               |
-| `[nxaBranchPickerCount]`          | Writes the number of branches.                                                                               |
+| Directive                         | Behavior                                                                                                                       |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `[nxaActionBarRoot]`              | Hides (`data-nxa-autohidden`, `hidden`) and floats (`data-nxa-floating`) by `autohide`, `autohideFloat` and `hideWhenRunning`. |
+| `button[nxaActionBarCopy]`        | Copies the message text, or the edit draft while editing. Sets `data-nxa-copied` and the message's `copied`.                   |
+| `button[nxaActionBarEdit]`        | Starts editing the message. Disabled while editing, or when the thread is disabled or cannot edit.                             |
+| `button[nxaActionBarReload]`      | Regenerates an assistant message as a new branch. Disabled during a run and for other messages.                                |
+| `[nxaBranchPickerRoot]`           | With `hideWhenSingleBranch`, carries `hidden` while the message has one branch.                                                |
+| `button[nxaBranchPickerPrevious]` | Shows the previous branch. Disabled on the first one, and during a run unless the runtime allows switching.                    |
+| `button[nxaBranchPickerNext]`     | Shows the next branch, with the same rules.                                                                                    |
+| `[nxaBranchPickerNumber]`         | Writes the 1-based number of the branch shown.                                                                                 |
+| `[nxaBranchPickerCount]`          | Writes the number of branches.                                                                                                 |
 
-`nxaActionBarRoot` options: `autohide` is `'never'` (default), `'always'` (hidden unless the pointer
-is over the message, as tracked by `nxaMessageRoot`) or `'not-last'` (the same, except on the last
-message); `autohideFloat` is `'never'` (default), `'always'` or `'single-branch'`, and floats a bar
-that the hover shows; `hideWhenRunning` hides the bar while the thread runs. Its status (`'hidden'`,
-`'floating'` or `'normal'`) is readable through `#bar="nxaActionBarRoot"` as `bar.status()`. The
-roots stay in the DOM when hidden; to remove them, wrap them in `*nxaMessageIf`. A `display` rule in
-your styles overrides `hidden`, so style the shown state with `:not([hidden])`.
+`nxaActionBarRoot` options: `autohide` is `'never'` (default), `'always'` (out of sight unless the
+pointer is over the message or the keyboard focus is inside it, as tracked by `nxaMessageRoot`) or
+`'not-last'` (the same, except on the last message); `autohideFloat` is `'never'` (default),
+`'always'` or `'single-branch'`, and floats a bar that the hover or the focus shows;
+`hideWhenRunning` hides the bar while the thread runs. Its status (`'hidden'`, `'autohidden'`,
+`'floating'` or `'normal'`) is readable through `#bar="nxaActionBarRoot"` as `bar.status()`.
+
+An auto-hidden bar carries `data-nxa-autohidden` and no `hidden`, so that its buttons stay in the
+tab order: tabbing into one puts the focus inside the message, which shows the bar. Hide it with a
+rule that keeps it focusable, for example:
+
+```css
+[nxaActionBarRoot][data-nxa-autohidden] {
+  opacity: 0;
+}
+```
+
+Without such a rule an auto-hidden bar stays visible. `hideWhenRunning` uses `hidden`. The roots
+stay in the DOM when hidden; to remove them, wrap them in `*nxaMessageIf`. A `display` rule in your
+styles overrides `hidden`, so style the shown state with `:not([hidden])`.
 
 `nxaActionBarCopy` options: `copiedDuration` (default `3000` ms) and `copyToClipboard`, a function
 that writes the text (default `navigator.clipboard.writeText`). The write happens inside the click,
