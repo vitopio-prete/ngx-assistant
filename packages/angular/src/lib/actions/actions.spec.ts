@@ -757,8 +757,15 @@ describe('nxaActionBarRoot', () => {
     return {
       status: bar.dataset['status'],
       hidden: bar.hasAttribute('hidden'),
+      autohidden: bar.hasAttribute('data-nxa-autohidden'),
       floating: bar.hasAttribute('data-nxa-floating'),
     };
+  };
+  // A Tab before the focus is what makes it a keyboard focus (`:focus-visible`).
+  const focus = async (fixture: ComponentFixture<unknown>, element: HTMLElement) => {
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    element.focus();
+    await settle(fixture);
   };
   const hover = async (fixture: ComponentFixture<unknown>, role: string, value: boolean) => {
     byRole(fixture, role).dispatchEvent(new MouseEvent(value ? 'mouseenter' : 'mouseleave'));
@@ -767,16 +774,22 @@ describe('nxaActionBarRoot', () => {
 
   it('stays visible by default', async () => {
     const fixture = await mount([createStore().provider]);
-    expect(status(fixture, 'user')).toEqual({ status: 'normal', hidden: false, floating: false });
+    expect(status(fixture, 'user')).toEqual({
+      status: 'normal',
+      hidden: false,
+      autohidden: false,
+      floating: false,
+    });
   });
 
-  it('autohide always: hidden until the pointer is over the message', async () => {
+  it('autohide always: out of sight until the pointer is over the message', async () => {
     const fixture = await mount([createStore().provider]);
     fixture.componentInstance.autohide.set('always');
     await settle(fixture);
     expect(status(fixture, 'assistant')).toEqual({
-      status: 'hidden',
-      hidden: true,
+      status: 'autohidden',
+      hidden: false,
+      autohidden: true,
       floating: false,
     });
 
@@ -784,11 +797,104 @@ describe('nxaActionBarRoot', () => {
     expect(status(fixture, 'assistant')).toEqual({
       status: 'normal',
       hidden: false,
+      autohidden: false,
       floating: false,
     });
 
     await hover(fixture, 'assistant', false);
-    expect(status(fixture, 'assistant').hidden).toBe(true);
+    expect(status(fixture, 'assistant').autohidden).toBe(true);
+  });
+
+  it('keeps an auto-hidden bar in the tab order and shows it while the focus is inside', async () => {
+    const fixture = await mount([createStore().provider]);
+    fixture.componentInstance.autohide.set('always');
+    await settle(fixture);
+    const copy = q<HTMLButtonElement>(byRole(fixture, 'assistant'), 'button.copy');
+    expect(copy.closest('[hidden]')).toBeNull();
+    expect(copy.tabIndex).toBe(0);
+
+    await focus(fixture, copy);
+    expect(byRole(fixture, 'assistant').hasAttribute('data-nxa-focus-within')).toBe(true);
+    expect(status(fixture, 'assistant').status).toBe('normal');
+
+    // From one action to the next the focus stays inside.
+    await focus(fixture, q(byRole(fixture, 'assistant'), 'button.reload'));
+    expect(status(fixture, 'assistant').status).toBe('normal');
+
+    // Into the other message: this one hides, that one shows.
+    await focus(fixture, q(byRole(fixture, 'user'), 'button.copy'));
+    expect(status(fixture, 'assistant').status).toBe('autohidden');
+    expect(status(fixture, 'user').status).toBe('normal');
+
+    (document.activeElement as HTMLElement).blur();
+    await settle(fixture);
+    expect(status(fixture, 'user').status).toBe('autohidden');
+    expect(byRole(fixture, 'user').hasAttribute('data-nxa-focus-within')).toBe(false);
+  });
+
+  it('floats an auto-hidden bar shown by the focus as by the hover', async () => {
+    const fixture = await mount([createStore().provider]);
+    fixture.componentInstance.autohide.set('always');
+    fixture.componentInstance.autohideFloat.set('always');
+    await settle(fixture);
+    await focus(fixture, q(byRole(fixture, 'user'), 'button.copy'));
+    expect(status(fixture, 'user')).toEqual({
+      status: 'floating',
+      hidden: false,
+      autohidden: false,
+      floating: true,
+    });
+  });
+
+  it('a focus the browser does not mark as visible does not keep the bar shown', async () => {
+    const fixture = await mount([createStore().provider]);
+    fixture.componentInstance.autohide.set('always');
+    await settle(fixture);
+    const matches = Element.prototype.matches;
+    const spy = vi.spyOn(Element.prototype, 'matches').mockImplementation(function (
+      this: Element,
+      selector: string,
+    ) {
+      return selector === ':focus-visible' ? false : matches.call(this, selector);
+    });
+    try {
+      await focus(fixture, q(byRole(fixture, 'user'), 'button.copy'));
+      expect(status(fixture, 'user').status).toBe('autohidden');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('forgets the focus of an action removed from the message once the focus moves on', async () => {
+    const fixture = await mount([createStore().provider]);
+    fixture.componentInstance.autohide.set('always');
+    await settle(fixture);
+    const copy = q<HTMLButtonElement>(byRole(fixture, 'user'), 'button.copy');
+    await focus(fixture, copy);
+    expect(status(fixture, 'user').status).toBe('normal');
+
+    // A removed element takes the focus with it without a focusout on the message.
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    copy.remove();
+    await focus(fixture, outside);
+    await settle(fixture);
+    expect(status(fixture, 'user').status).toBe('autohidden');
+    outside.remove();
+  });
+
+  it('forgets the focus of a removed action when the pointer leaves, with nothing focused', async () => {
+    const fixture = await mount([createStore().provider]);
+    fixture.componentInstance.autohide.set('always');
+    await settle(fixture);
+    const copy = q<HTMLButtonElement>(byRole(fixture, 'user'), 'button.copy');
+    await focus(fixture, copy);
+    copy.remove();
+    expect(document.activeElement).toBe(document.body);
+
+    await hover(fixture, 'user', true);
+    await hover(fixture, 'user', false);
+    expect(status(fixture, 'user').status).toBe('autohidden');
   });
 
   it('autohide not-last: the last message keeps its bar, the others show it on hover', async () => {
@@ -796,7 +902,7 @@ describe('nxaActionBarRoot', () => {
     fixture.componentInstance.autohide.set('not-last');
     await settle(fixture);
     expect(status(fixture, 'assistant').status).toBe('normal');
-    expect(status(fixture, 'user').status).toBe('hidden');
+    expect(status(fixture, 'user').status).toBe('autohidden');
 
     await hover(fixture, 'user', true);
     expect(status(fixture, 'user').status).toBe('normal');
@@ -808,7 +914,12 @@ describe('nxaActionBarRoot', () => {
     fixture.componentInstance.autohideFloat.set('always');
     await settle(fixture);
     await hover(fixture, 'user', true);
-    expect(status(fixture, 'user')).toEqual({ status: 'floating', hidden: false, floating: true });
+    expect(status(fixture, 'user')).toEqual({
+      status: 'floating',
+      hidden: false,
+      autohidden: false,
+      floating: true,
+    });
 
     fixture.componentInstance.autohide.set('never');
     await settle(fixture);

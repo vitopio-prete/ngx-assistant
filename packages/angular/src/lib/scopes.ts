@@ -48,12 +48,14 @@ export interface SuggestionRuntime {
 export const NXA_SUGGESTION = new InjectionToken<SuggestionRuntime | null>('NXA_SUGGESTION');
 
 /**
- * View state of one message that the engine does not keep: hover and copy feedback. It belongs to
+ * View state of one message that the engine does not keep: hover, focus and copy feedback. It belongs to
  * the message scope that provides it, so a nested scope for the same message starts afresh.
  */
 export interface MessageUiState {
   /** Whether the pointer is over the message root. */
   readonly isHovering: WritableSignal<boolean>;
+  /** Whether the keyboard focus (`:focus-visible`) is inside the message root. */
+  readonly isFocusWithin: WritableSignal<boolean>;
   /** Whether the message was just copied, for copy feedback. */
   readonly isCopied: WritableSignal<boolean>;
 }
@@ -100,7 +102,11 @@ export function provideMessageScope(factory: () => MessageRuntime): Provider[] {
     { provide: NXA_MESSAGE, useFactory: factory },
     {
       provide: NXA_MESSAGE_UI,
-      useFactory: (): MessageUiState => ({ isHovering: signal(false), isCopied: signal(false) }),
+      useFactory: (): MessageUiState => ({
+        isHovering: signal(false),
+        isFocusWithin: signal(false),
+        isCopied: signal(false),
+      }),
     },
     { provide: NXA_COMPOSER, useFactory: () => inject(NXA_MESSAGE)!.composer },
     ...cleared(NXA_PART, NXA_TOOL_CALL, NXA_TOOL_APPROVAL, NXA_ATTACHMENT),

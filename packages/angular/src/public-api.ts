@@ -11,6 +11,7 @@ export * from './lib/events';
 export * from './lib/composer';
 export * from './lib/thread';
 export * from './lib/messages';
+export * from './lib/message-part';
 export * from './lib/actions';
 export * from './lib/attachments';
 export * from './lib/error';
