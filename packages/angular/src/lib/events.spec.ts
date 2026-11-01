@@ -299,7 +299,7 @@ describe('injectNxaEvent', () => {
       expect(() => listen(injector, { scope: 'message', event: 'thread.runEnd' } as never)).toThrow(
         '[ngx-assistant] Event "thread.runEnd" cannot be heard in the "message" scope.',
       );
-      for (const event of ['thread.unknown', 'message.copied', 'threads.unknown', 'constructor']) {
+      for (const event of ['thread.unknown', 'message.unknown', 'threads.unknown', 'constructor']) {
         expect(() => listen(injector, { scope: '*', event } as never)).toThrow(
           `[ngx-assistant] Unknown event "${event}".`,
         );

@@ -264,6 +264,7 @@ injectNxaEvent({ scope: 'thread', event: 'message.error' }, ({ messageId }) =>
 | `thread.historyWriteError`, `toolApprovalAnswered`              | `thread`, `threads`, `*`                        |
 | `composer.send`, `attachmentAdd`, `attachmentAddError`          | `composer`, `message`, `thread`, `threads`, `*` |
 | `message.error`                                                 | `message`, `thread`, `threads`, `*`             |
+| `message.copied`, `speak`, `reload`, `branchSwitched`           | `message`, `thread`, `threads`, `*`             |
 | `threads.selectionChanged`                                      | `threads`, `*`                                  |
 
 A plain event name is heard in the nearest scope of its source: `'composer.attachmentAdd'` inside
@@ -277,6 +278,10 @@ can write signals. Errors, thrown or rejected, go to Angular's `ErrorHandler`.
 
 - `composer.send` reports the composers' own sends, including the send that ends an edit (whose
   `messageId` is the edited message, not the one that replaces it), but not `thread.append(...)`.
+- `message.copied`, `message.speak`, `message.reload` and `message.branchSwitched` are reported by
+  the action bar and branch picker buttons (a successful copy, a click on speak, regenerate,
+  previous or next), with `{ threadId, messageId }`. Calling the runtime directly does not report
+  them. A nested runtime provider has its own.
 - `thread.initialize` also reaches a subscription that starts on, or follows the selection to, a
   thread that is already initialized, once.
 
@@ -512,8 +517,13 @@ inside a message scope, such as a row of `*nxaMessages`.
 import {
   NxaActionBarCopy,
   NxaActionBarEdit,
+  NxaActionBarExportMarkdown,
+  NxaActionBarFeedbackNegative,
+  NxaActionBarFeedbackPositive,
   NxaActionBarReload,
   NxaActionBarRoot,
+  NxaActionBarSpeak,
+  NxaActionBarStopSpeaking,
   NxaBranchPickerCount,
   NxaBranchPickerNext,
   NxaBranchPickerNumber,
@@ -536,6 +546,11 @@ import {
     <button nxaActionBarCopy>Copy</button>
     <button nxaActionBarEdit>Edit</button>
     <button nxaActionBarReload>Regenerate</button>
+    <button nxaActionBarFeedbackPositive aria-label="Helpful">👍</button>
+    <button nxaActionBarFeedbackNegative aria-label="Not helpful">👎</button>
+    <button *nxaMessageIf="{ speaking: false }; else stop" nxaActionBarSpeak>Read aloud</button>
+    <ng-template #stop><button nxaActionBarStopSpeaking>Stop</button></ng-template>
+    <button nxaActionBarExportMarkdown>Export</button>
   </div>
   <div nxaBranchPickerRoot hideWhenSingleBranch>
     <button nxaBranchPickerPrevious aria-label="Previous">‹</button>
@@ -545,17 +560,22 @@ import {
 </article>
 ```
 
-| Directive                         | Behavior                                                                                                                       |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `[nxaActionBarRoot]`              | Hides (`data-nxa-autohidden`, `hidden`) and floats (`data-nxa-floating`) by `autohide`, `autohideFloat` and `hideWhenRunning`. |
-| `button[nxaActionBarCopy]`        | Copies the message text, or the edit draft while editing. Sets `data-nxa-copied` and the message's `copied`.                   |
-| `button[nxaActionBarEdit]`        | Starts editing the message. Disabled while editing, or when the thread is disabled or cannot edit.                             |
-| `button[nxaActionBarReload]`      | Regenerates an assistant message as a new branch. Disabled during a run and for other messages.                                |
-| `[nxaBranchPickerRoot]`           | With `hideWhenSingleBranch`, carries `hidden` while the message has one branch.                                                |
-| `button[nxaBranchPickerPrevious]` | Shows the previous branch. Disabled on the first one, and during a run unless the runtime allows switching.                    |
-| `button[nxaBranchPickerNext]`     | Shows the next branch, with the same rules.                                                                                    |
-| `[nxaBranchPickerNumber]`         | Writes the 1-based number of the branch shown.                                                                                 |
-| `[nxaBranchPickerCount]`          | Writes the number of branches.                                                                                                 |
+| Directive                              | Behavior                                                                                                                       |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `[nxaActionBarRoot]`                   | Hides (`data-nxa-autohidden`, `hidden`) and floats (`data-nxa-floating`) by `autohide`, `autohideFloat` and `hideWhenRunning`. |
+| `button[nxaActionBarCopy]`             | Copies the message text, or the edit draft while editing. Sets `data-nxa-copied` and the message's `copied`.                   |
+| `button[nxaActionBarEdit]`             | Starts editing the message. Disabled while editing, or when the thread is disabled or cannot edit.                             |
+| `button[nxaActionBarReload]`           | Regenerates an assistant message as a new branch. Disabled during a run and for other messages.                                |
+| `button[nxaActionBarFeedbackPositive]` | Submits positive feedback. `aria-pressed` and `data-nxa-submitted` while the message's feedback is positive.                   |
+| `button[nxaActionBarFeedbackNegative]` | Submits negative feedback, with the same attributes for negative feedback.                                                     |
+| `button[nxaActionBarSpeak]`            | Reads the message aloud. Disabled without a speech adapter, while an assistant message runs, or without text.                  |
+| `button[nxaActionBarStopSpeaking]`     | Stops reading the message aloud. Disabled while the message is not the one being read.                                         |
+| `button[nxaActionBarExportMarkdown]`   | Downloads the message text as markdown, or hands it to `exportMarkdown`. Disabled like copy.                                   |
+| `[nxaBranchPickerRoot]`                | With `hideWhenSingleBranch`, carries `hidden` while the message has one branch.                                                |
+| `button[nxaBranchPickerPrevious]`      | Shows the previous branch. Disabled on the first one, and during a run unless the runtime allows switching.                    |
+| `button[nxaBranchPickerNext]`          | Shows the next branch, with the same rules.                                                                                    |
+| `[nxaBranchPickerNumber]`              | Writes the 1-based number of the branch shown.                                                                                 |
+| `[nxaBranchPickerCount]`               | Writes the number of branches.                                                                                                 |
 
 `nxaActionBarRoot` options: `autohide` is `'never'` (default), `'always'` (out of sight unless the
 pointer is over the message or the keyboard focus is inside it, as tracked by `nxaMessageRoot`) or
@@ -584,6 +604,16 @@ so browsers that require a user gesture accept it. A failed write, or one that c
 button is gone, leaves the message as it was. The copy is disabled while an assistant message is
 still running or the message has no text. The copied state belongs to the message, so copy buttons
 of the same message share it.
+
+The feedback buttons call the runtime's `FeedbackAdapter` (`adapters.feedback`); without one the
+feedback is still recorded on the assistant message, so the buttons stay enabled. Speech needs a
+`SpeechSynthesisAdapter` (`adapters.speech`, for example `new WebSpeechSynthesisAdapter()`);
+reading another message stops the current one. `*nxaMessageIf="{ speaking: true }"` and
+`{ submittedFeedback: 'positive' }` follow the same state.
+
+`nxaActionBarExportMarkdown` options: `filename` (default `message-<timestamp>.md`) and
+`exportMarkdown`, a function that receives the text instead of the download, for example to save
+it elsewhere. A failed export is reported with `console.error`.
 
 Every button takes `disabled` on top of its own state, and a capture-phase listener can veto its
 click with `event.preventDefault()`.

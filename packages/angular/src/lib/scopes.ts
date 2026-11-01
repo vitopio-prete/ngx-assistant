@@ -10,6 +10,7 @@ import type {
   ThreadRuntime,
 } from '@ngx-assistant/engine';
 import { NXA_TOOL_APPROVAL } from './tools/approval/approval-state';
+import { MessageUiEvents, NXA_MESSAGE_UI_EVENTS } from './ui-events';
 import { NXA_TOOL_CALL, createToolCall } from './tools/tool-call';
 import {
   NXA_ASSISTANT_TOOL_UI_REGISTRY,
@@ -78,6 +79,7 @@ export function provideAssistantScope(factory: () => AssistantRuntime): Provider
     { provide: NXA_THREAD, useFactory: () => inject(NXA_ASSISTANT)!.thread },
     { provide: NXA_COMPOSER, useFactory: () => inject(NXA_THREAD)!.composer },
     TOOL_UI_REGISTRY_PROVIDER,
+    { provide: NXA_MESSAGE_UI_EVENTS, useFactory: () => new MessageUiEvents() },
     { provide: NXA_ASSISTANT_TOOL_UI_REGISTRY, useFactory: () => inject(NXA_TOOL_UI_REGISTRY) },
     ...cleared(
       NXA_MESSAGE,
