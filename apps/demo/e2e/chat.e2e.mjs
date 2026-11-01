@@ -143,7 +143,11 @@ async function waitFor(check, what, timeout = 5000) {
   }
 }
 
-const idle = () => waitFor(() => !isRunning(), 'the run to finish');
+// A run is over once the thread stops and every text is shown in full (the text is revealed a few
+// characters per frame, and may still be catching up when the stream ends).
+const settled = () =>
+  !isRunning() && !document.querySelector('[nxaMessagePartText][data-nxa-status="running"]');
+const idle = () => waitFor(settled, 'the run to finish');
 
 function type(value, target = input()) {
   target.value = value;
@@ -279,7 +283,7 @@ await check('Enter sends, clears the composer and streams the reply', async () =
   const frames = new Set();
   await waitFor(() => {
     frames.add(lastReply());
-    return !isRunning();
+    return settled();
   }, 'the run to finish');
   frames.delete('');
   assert.equal(lastReply(), 'Echo: ciao mondo');
@@ -328,17 +332,29 @@ await check('after Stop the thread accepts a new message, in order', async () =>
   assert.equal(messages()[6].text, 'second message');
 });
 
-await check('user messages always show their actions, earlier replies on hover', async () => {
-  const bar = (article) => article.querySelector('.action-bar');
-  assert.ok(articles('user').every((article) => !bar(article).hidden));
-  assert.equal(bar(lastAssistant()).hidden, false);
-  const earlier = articles('assistant')[0];
-  assert.equal(bar(earlier).hidden, true);
-  earlier.dispatchEvent(new window.MouseEvent('mouseenter'));
-  await waitFor(() => !bar(earlier).hidden, 'the hovered actions');
-  earlier.dispatchEvent(new window.MouseEvent('mouseleave'));
-  await waitFor(() => bar(earlier).hidden, 'the actions to hide again');
-});
+await check(
+  'user messages always show their actions, earlier replies on hover or focus',
+  async () => {
+    const bar = (article) => article.querySelector('.action-bar');
+    const autohidden = (article) => bar(article).hasAttribute('data-nxa-autohidden');
+    assert.ok(articles('user').every((article) => !autohidden(article)));
+    assert.equal(autohidden(lastAssistant()), false);
+    const earlier = articles('assistant')[0];
+    assert.equal(autohidden(earlier), true);
+    assert.equal(bar(earlier).hidden, false, 'an auto-hidden bar stays in the tab order');
+    earlier.dispatchEvent(new window.MouseEvent('mouseenter'));
+    await waitFor(() => !autohidden(earlier), 'the hovered actions');
+    earlier.dispatchEvent(new window.MouseEvent('mouseleave'));
+    await waitFor(() => autohidden(earlier), 'the actions to hide again');
+
+    // Tabbing into the hidden actions shows them.
+    document.body.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    button(earlier, 'Copy').focus();
+    await waitFor(() => !autohidden(earlier), 'the focused actions');
+    button(earlier, 'Copy').blur();
+    await waitFor(() => autohidden(earlier), 'the actions to hide after the focus');
+  },
+);
 
 await check('Regenerate adds a branch, and the branch picker moves between them', async () => {
   const reply = lastAssistant();
@@ -562,6 +578,12 @@ await check('the model picker sends the model and its effort with every run', as
   await pickModel('Echo', 'High');
   assert.equal(text(modelTrigger()), 'Echo · high effort');
   await send('think first');
+  // The reasoning closes once the answer starts, and opens again on demand.
+  const toggle = lastAssistant().querySelector('.reasoning-toggle');
+  assert.equal(text(toggle), 'Reasoning');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  toggle.click();
+  await waitFor(() => lastAssistant().querySelector('.reasoning'), 'the reasoning to open');
   assert.equal(text(lastAssistant().querySelector('.reasoning')), 'Thinking with high effort.');
   assert.equal(lastText(), 'Echo: think first');
   assert.equal(lastChatBody().modelName, 'echo');

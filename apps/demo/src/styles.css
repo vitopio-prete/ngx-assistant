@@ -336,8 +336,20 @@ nxa-demo-root {
   overflow-wrap: anywhere;
 }
 
-.reasoning {
+.reasoning-group {
   margin: 0 0 4px;
+}
+
+.reasoning-toggle {
+  border-color: transparent;
+  background: transparent;
+  padding: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.reasoning {
+  margin: 2px 0 0;
   color: var(--muted);
   font-style: italic;
 }
@@ -407,6 +419,11 @@ nxa-demo-root {
 .action-bar {
   display: flex;
   gap: 2px;
+}
+
+/* Out of sight but still in the tab order: tabbing into it shows it. */
+.action-bar[data-nxa-autohidden] {
+  opacity: 0;
 }
 
 .action {
