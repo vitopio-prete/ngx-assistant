@@ -1,6 +1,6 @@
 import { Directive, inject } from '@angular/core';
 import { fromRuntime } from '../from-runtime';
-import { injectThreadListItem } from '../scopes';
+import { injectThreadListItem, injectThreadListItemUi } from '../scopes';
 import {
   NXA_THREAD_LIST_COLLECTION,
   NXA_THREAD_LIST_ITEM_FOCUS,
@@ -9,7 +9,7 @@ import {
 
 /**
  * The root element of a thread list item. Carries `data-active` and `aria-current` while its
- * thread is the main one.
+ * thread is the main one, and `data-nxa-renaming` while its title is being edited.
  *
  * Inside a `nxaThreadListRoot`, ArrowDown and ArrowUp on the item's trigger move the focus to the
  * next or previous enabled trigger of the list, in document order, without wrapping. Keys with a modifier
@@ -28,17 +28,21 @@ import {
   providers: [
     {
       provide: NXA_THREAD_LIST_ITEM_FOCUS,
-      useFactory: (): ThreadListItemFocus => ({ trigger: null }),
+      // The item scope's own, so the triggers and rename inputs of the row share it.
+      useFactory: (): ThreadListItemFocus =>
+        inject(NXA_THREAD_LIST_ITEM_FOCUS, { optional: true, skipSelf: true }) ?? { trigger: null },
     },
   ],
   host: {
     '[attr.data-active]': "isMain() ? 'true' : null",
     '[attr.aria-current]': "isMain() ? 'true' : null",
+    '[attr.data-nxa-renaming]': "ui?.isRenaming() ? '' : null",
     '(keydown)': 'onKeydown($event)',
   },
 })
 export class NxaThreadListItemRoot {
   protected readonly isMain = fromRuntime(injectThreadListItem(), (s) => s.isMain);
+  protected readonly ui = injectThreadListItemUi({ optional: true });
   private readonly focus = inject(NXA_THREAD_LIST_ITEM_FOCUS, { self: true })!;
   private readonly collection = inject(NXA_THREAD_LIST_COLLECTION, { optional: true });
 

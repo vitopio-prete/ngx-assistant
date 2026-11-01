@@ -6,3 +6,4 @@ export * from './thread-list-item-root';
 export * from './thread-list-item-trigger';
 export * from './thread-list-item-title';
 export * from './thread-list-item-actions';
+export * from './thread-list-item-rename';

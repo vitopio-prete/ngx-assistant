@@ -210,23 +210,25 @@ tool approvals are not supported: answer a tool call from the browser with `addT
 
 Each runtime lives in a scope of the injector tree, and `inject*()` returns the nearest one:
 
-| Function                 | Token                  | Provided by                                                |
-| ------------------------ | ---------------------- | ---------------------------------------------------------- |
-| `injectAssistant()`      | `NXA_ASSISTANT`        | a runtime provider, `provideAssistantScope(() => runtime)` |
-| `injectThread()`         | `NXA_THREAD`           | a runtime provider                                         |
-| `injectComposer()`       | `NXA_COMPOSER`         | the runtime (thread composer) or a message                 |
-| `injectMessage()`        | `NXA_MESSAGE`          | `provideMessageScope(() => message)`                       |
-| `injectMessageUi()`      | `NXA_MESSAGE_UI`       | `provideMessageScope(() => message)`                       |
-| `injectPart()`           | `NXA_PART`             | `providePartScope(() => part)`                             |
-| `injectAttachment()`     | `NXA_ATTACHMENT`       | `provideAttachmentScope(() => attachment)`                 |
-| `injectThreadList()`     | `NXA_THREAD_LIST`      | a runtime provider                                         |
-| `injectThreadListItem()` | `NXA_THREAD_LIST_ITEM` | `provideThreadListItemScope(() => item)`                   |
-| `injectSuggestion()`     | `NXA_SUGGESTION`       | `provideSuggestionScope(() => suggestion)`                 |
-| `injectToolCall()`       | `NXA_TOOL_CALL`        | `providePartScope(() => part)`, for a `tool-call` part     |
+| Function                   | Token                     | Provided by                                                |
+| -------------------------- | ------------------------- | ---------------------------------------------------------- |
+| `injectAssistant()`        | `NXA_ASSISTANT`           | a runtime provider, `provideAssistantScope(() => runtime)` |
+| `injectThread()`           | `NXA_THREAD`              | a runtime provider                                         |
+| `injectComposer()`         | `NXA_COMPOSER`            | the runtime (thread composer) or a message                 |
+| `injectMessage()`          | `NXA_MESSAGE`             | `provideMessageScope(() => message)`                       |
+| `injectMessageUi()`        | `NXA_MESSAGE_UI`          | `provideMessageScope(() => message)`                       |
+| `injectPart()`             | `NXA_PART`                | `providePartScope(() => part)`                             |
+| `injectAttachment()`       | `NXA_ATTACHMENT`          | `provideAttachmentScope(() => attachment)`                 |
+| `injectThreadList()`       | `NXA_THREAD_LIST`         | a runtime provider                                         |
+| `injectThreadListItem()`   | `NXA_THREAD_LIST_ITEM`    | `provideThreadListItemScope(() => item)`                   |
+| `injectThreadListItemUi()` | `NXA_THREAD_LIST_ITEM_UI` | `provideThreadListItemScope(() => item)`                   |
+| `injectSuggestion()`       | `NXA_SUGGESTION`          | `provideSuggestionScope(() => suggestion)`                 |
+| `injectToolCall()`         | `NXA_TOOL_CALL`           | `providePartScope(() => part)`, for a `tool-call` part     |
 
 Inside a message scope `injectComposer()` returns the message's edit composer; the thread composer
 stays reachable as `injectThread().composer`. `injectMessageUi()` holds the view state of the message
-that the runtime does not keep, as writable signals: `isHovering`, `isFocusWithin` and `isCopied`. A missing scope throws, unless you pass
+that the runtime does not keep, as writable signals: `isHovering`, `isFocusWithin` and `isCopied`;
+`injectThreadListItemUi()` does the same for a thread list item, with `isRenaming`. A missing scope throws, unless you pass
 `{ optional: true }` to get `null`. A nested runtime provider isolates its subtree from the outer
 scopes.
 
@@ -696,12 +698,16 @@ a string error as is, the `message` of an error object, any other value as is, o
 
 ## Thread list primitives
 
-Headless directives for the list of threads: switching, creating, archiving and deleting them.
+Headless directives for the list of threads: switching, creating, renaming, archiving and deleting
+them.
 
 ```ts
 import {
   NxaThreadListItemArchive,
   NxaThreadListItemDelete,
+  NxaThreadListItemIf,
+  NxaThreadListItemRename,
+  NxaThreadListItemRenameInput,
   NxaThreadListItemRoot,
   NxaThreadListItems,
   NxaThreadListItemTitle,
@@ -717,9 +723,17 @@ import {
 <nav nxaThreadListRoot>
   <button nxaThreadListNew>New chat</button>
   <div *nxaThreadListItems="let thread" nxaThreadListItemRoot>
-    <button nxaThreadListItemTrigger>
-      <span nxaThreadListItemTitle fallback="New chat"></span>
-    </button>
+    <input
+      *nxaThreadListItemIf="{ renaming: true }; else trigger"
+      nxaThreadListItemRenameInput
+      aria-label="Rename thread"
+    />
+    <ng-template #trigger>
+      <button nxaThreadListItemTrigger>
+        <span nxaThreadListItemTitle fallback="New chat"></span>
+      </button>
+    </ng-template>
+    <button nxaThreadListItemRename>Rename</button>
     <button nxaThreadListItemArchive>Archive</button>
     <button nxaThreadListItemDelete>Delete</button>
   </div>
@@ -732,18 +746,21 @@ import {
 </nav>
 ```
 
-| Directive                            | Behavior                                                                                                                        |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| `[nxaThreadListRoot]`                | Collects the item triggers inside it for the arrow keys.                                                                        |
-| `button[nxaThreadListNew]`           | Switches to a new thread; `data-active` and `aria-current` while the new thread is the main one.                                |
-| `button[nxaThreadListLoadMore]`      | Loads more threads; disabled while there are none or a load is in flight.                                                       |
-| `*nxaThreadListItems`                | One row per thread, or per archived thread with `archived: true`, each a thread list item scope.                                |
-| `[nxaThreadListItemRoot]`            | `data-active` and `aria-current` on the main thread; ArrowDown and ArrowUp on its trigger move to the next or previous trigger. |
-| `button[nxaThreadListItemTrigger]`   | Switches to the row's thread; `data-active` and `aria-current` while it is the main one.                                        |
-| `[nxaThreadListItemTitle]`           | The thread title as text, or `fallback` while it has none. Exported as `nxaThreadListItemTitle`, with `title()`.                |
-| `button[nxaThreadListItemArchive]`   | Archives the row's thread.                                                                                                      |
-| `button[nxaThreadListItemUnarchive]` | Restores the row's archived thread; disabled while the thread list cannot restore threads.                                      |
-| `button[nxaThreadListItemDelete]`    | Deletes the row's thread.                                                                                                       |
+| Directive                             | Behavior                                                                                                                        |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `[nxaThreadListRoot]`                 | Collects the item triggers inside it for the arrow keys.                                                                        |
+| `button[nxaThreadListNew]`            | Switches to a new thread; `data-active` and `aria-current` while the new thread is the main one.                                |
+| `button[nxaThreadListLoadMore]`       | Loads more threads; disabled while there are none or a load is in flight.                                                       |
+| `*nxaThreadListItems`                 | One row per thread, or per archived thread with `archived: true`, each a thread list item scope.                                |
+| `[nxaThreadListItemRoot]`             | `data-active` and `aria-current` on the main thread; ArrowDown and ArrowUp on its trigger move to the next or previous trigger. |
+| `button[nxaThreadListItemTrigger]`    | Switches to the row's thread; `data-active` and `aria-current` while it is the main one.                                        |
+| `[nxaThreadListItemTitle]`            | The thread title as text, or `fallback` while it has none. Exported as `nxaThreadListItemTitle`, with `title()`.                |
+| `button[nxaThreadListItemArchive]`    | Archives the row's thread.                                                                                                      |
+| `button[nxaThreadListItemUnarchive]`  | Restores the row's archived thread; disabled while the thread list cannot restore threads.                                      |
+| `button[nxaThreadListItemDelete]`     | Deletes the row's thread.                                                                                                       |
+| `button[nxaThreadListItemRename]`     | Starts editing the row's title (`injectThreadListItemUi().isRenaming`); the root carries `data-nxa-renaming` meanwhile.         |
+| `input[nxaThreadListItemRenameInput]` | Edits the title: starts with it, focused and selected; Enter or blur renames, Escape cancels.                                   |
+| `*nxaThreadListItemIf`                | Renders while the row meets every condition given (`renaming`, `main`, `archived`), and `else` otherwise.                       |
 
 The list gives `let thread` as a `Signal` of the thread list item state, plus `index`, `count`,
 `first` and `last`. A row follows its thread by id: archiving, deleting or adding another thread
@@ -752,6 +769,14 @@ skip disabled triggers, do not wrap and leave keys with a modifier alone; a `key
 the move. A failed action is reported with `console.error`. The runtime decides which threads
 exist: `provideRemoteThreadListRuntime` lists those of its adapter, `provideExternalStoreRuntime`
 those of its `adapters.threadList`, while `provideLocalRuntime` keeps a single thread and lists none.
+
+The rename input confirms the value without the spaces at its ends; a blank value or the current
+title only ends the editing. Enter and Escape are ignored during an IME composition, and a
+capture-phase `keydown` listener can veto them. After Enter or Escape the focus returns to the row's
+trigger, unless the user has moved it elsewhere meanwhile. A rename the runtime rejects keeps the
+input open, with what was typed, and is reported with `console.error`. An input left in the DOM
+outside `*nxaThreadListItemIf` starts afresh, with the current title, each time editing starts. Editing ends by setting `isRenaming` to `false`, so a menu can start and
+end it through `injectThreadListItemUi()` as well.
 
 ## Suggestion primitives
 
