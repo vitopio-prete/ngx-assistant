@@ -1,6 +1,7 @@
-import { Directive, booleanAttribute, computed, input } from '@angular/core';
+import { Directive, booleanAttribute, computed, inject, input } from '@angular/core';
 import { fromRuntime } from '../from-runtime';
 import { injectMessage, injectThread } from '../scopes';
+import { NXA_MESSAGE_UI_EVENTS, emitMessageUiEvent } from '../ui-events';
 import { branchDisabled } from './action-state';
 
 /**
@@ -33,8 +34,8 @@ export class NxaBranchPickerRoot {
 /**
  * A button that moves the nearest message to its previous branch. Disabled on the first branch,
  * when the thread does not switch branches, or during a run when the runtime does not switch
- * branches while running. A capture-phase `click` listener can veto the switch with
- * `preventDefault()`.
+ * branches while running. It reports `message.branchSwitched` to `injectNxaEvent()`. A
+ * capture-phase `click` listener can veto the switch with `preventDefault()`.
  */
 @Directive({
   selector: 'button[nxaBranchPickerPrevious]',
@@ -44,12 +45,15 @@ export class NxaBranchPickerPrevious {
   /** Disables the button on top of the message state. */
   readonly disabled = input(false, { transform: booleanAttribute });
 
+  private readonly thread = injectThread();
   private readonly message = injectMessage();
-  private readonly blocked = branchDisabled(injectThread(), this.message, 'previous');
+  private readonly events = inject(NXA_MESSAGE_UI_EVENTS, { optional: true });
+  private readonly blocked = branchDisabled(this.thread, this.message, 'previous');
   protected readonly isDisabled = computed(() => this.disabled() || this.blocked());
 
   protected onClick(event: MouseEvent) {
     if (event.defaultPrevented || this.isDisabled()) return;
+    emitMessageUiEvent(this.events, this.thread, this.message, 'message.branchSwitched');
     this.message.switchToBranch({ position: 'previous' });
   }
 }
@@ -57,7 +61,8 @@ export class NxaBranchPickerPrevious {
 /**
  * A button that moves the nearest message to its next branch. Disabled on the last branch, when
  * the thread does not switch branches, or during a run when the runtime does not switch branches
- * while running. A capture-phase `click` listener can veto the switch with `preventDefault()`.
+ * while running. It reports `message.branchSwitched` to `injectNxaEvent()`. A capture-phase
+ * `click` listener can veto the switch with `preventDefault()`.
  */
 @Directive({
   selector: 'button[nxaBranchPickerNext]',
@@ -67,12 +72,15 @@ export class NxaBranchPickerNext {
   /** Disables the button on top of the message state. */
   readonly disabled = input(false, { transform: booleanAttribute });
 
+  private readonly thread = injectThread();
   private readonly message = injectMessage();
-  private readonly blocked = branchDisabled(injectThread(), this.message, 'next');
+  private readonly events = inject(NXA_MESSAGE_UI_EVENTS, { optional: true });
+  private readonly blocked = branchDisabled(this.thread, this.message, 'next');
   protected readonly isDisabled = computed(() => this.disabled() || this.blocked());
 
   protected onClick(event: MouseEvent) {
     if (event.defaultPrevented || this.isDisabled()) return;
+    emitMessageUiEvent(this.events, this.thread, this.message, 'message.branchSwitched');
     this.message.switchToBranch({ position: 'next' });
   }
 }

@@ -10,6 +10,11 @@ import type {
   ThreadRuntime,
 } from '@ngx-assistant/engine';
 import { NXA_TOOL_APPROVAL } from './tools/approval/approval-state';
+import {
+  NXA_THREAD_LIST_ITEM_FOCUS,
+  type ThreadListItemFocus,
+} from './thread-list/thread-list-state';
+import { MessageUiEvents, NXA_MESSAGE_UI_EVENTS } from './ui-events';
 import { NXA_TOOL_CALL, createToolCall } from './tools/tool-call';
 import {
   NXA_ASSISTANT_TOOL_UI_REGISTRY,
@@ -62,6 +67,19 @@ export interface MessageUiState {
 
 export const NXA_MESSAGE_UI = new InjectionToken<MessageUiState | null>('NXA_MESSAGE_UI');
 
+/**
+ * View state of one thread list item that the engine does not keep: whether its title is being
+ * edited. It belongs to the thread list item scope that provides it.
+ */
+export interface ThreadListItemUiState {
+  /** Whether the title is being edited, with `input[nxaThreadListItemRenameInput]`. */
+  readonly isRenaming: WritableSignal<boolean>;
+}
+
+export const NXA_THREAD_LIST_ITEM_UI = new InjectionToken<ThreadListItemUiState | null>(
+  'NXA_THREAD_LIST_ITEM_UI',
+);
+
 const cleared = (...tokens: InjectionToken<unknown>[]): Provider[] =>
   tokens.map((provide) => ({ provide, useValue: null }));
 
@@ -78,6 +96,7 @@ export function provideAssistantScope(factory: () => AssistantRuntime): Provider
     { provide: NXA_THREAD, useFactory: () => inject(NXA_ASSISTANT)!.thread },
     { provide: NXA_COMPOSER, useFactory: () => inject(NXA_THREAD)!.composer },
     TOOL_UI_REGISTRY_PROVIDER,
+    { provide: NXA_MESSAGE_UI_EVENTS, useFactory: () => new MessageUiEvents() },
     { provide: NXA_ASSISTANT_TOOL_UI_REGISTRY, useFactory: () => inject(NXA_TOOL_UI_REGISTRY) },
     ...cleared(
       NXA_MESSAGE,
@@ -87,6 +106,8 @@ export function provideAssistantScope(factory: () => AssistantRuntime): Provider
       NXA_TOOL_APPROVAL,
       NXA_ATTACHMENT,
       NXA_THREAD_LIST_ITEM,
+      NXA_THREAD_LIST_ITEM_UI,
+      NXA_THREAD_LIST_ITEM_FOCUS,
       NXA_SUGGESTION,
     ),
   ];
@@ -133,9 +154,23 @@ export function provideAttachmentScope(factory: () => AttachmentRuntime): Provid
   return [{ provide: NXA_ATTACHMENT, useFactory: factory }];
 }
 
-/** Provides a thread list item scope, under an assistant scope. */
+/**
+ * Provides a thread list item scope, under an assistant scope. Each scope has its own
+ * `NXA_THREAD_LIST_ITEM_UI` state.
+ */
 export function provideThreadListItemScope(factory: () => ThreadListItemRuntime): Provider[] {
-  return [{ provide: NXA_THREAD_LIST_ITEM, useFactory: factory }];
+  return [
+    { provide: NXA_THREAD_LIST_ITEM, useFactory: factory },
+    {
+      provide: NXA_THREAD_LIST_ITEM_UI,
+      useFactory: (): ThreadListItemUiState => ({ isRenaming: signal(false) }),
+    },
+    // Where the item's trigger is, for the rename input to give the focus back.
+    {
+      provide: NXA_THREAD_LIST_ITEM_FOCUS,
+      useFactory: (): ThreadListItemFocus => ({ trigger: null }),
+    },
+  ];
 }
 
 /** Provides a suggestion scope, under an assistant scope. */
@@ -265,6 +300,23 @@ export function injectThreadListItem(options: InjectScopeOptions): ThreadListIte
 export function injectThreadListItem(options?: InjectScopeOptions) {
   return injectScope(
     NXA_THREAD_LIST_ITEM,
+    'thread list item',
+    'call it inside a thread list item scope.',
+    options,
+  );
+}
+
+/** The view state of the nearest thread list item. */
+export function injectThreadListItemUi(
+  options: InjectScopeOptions & { optional: true },
+): ThreadListItemUiState | null;
+export function injectThreadListItemUi(
+  options?: InjectScopeOptions & { optional?: false },
+): ThreadListItemUiState;
+export function injectThreadListItemUi(options: InjectScopeOptions): ThreadListItemUiState | null;
+export function injectThreadListItemUi(options?: InjectScopeOptions) {
+  return injectScope(
+    NXA_THREAD_LIST_ITEM_UI,
     'thread list item',
     'call it inside a thread list item scope.',
     options,

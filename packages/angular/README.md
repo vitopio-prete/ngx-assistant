@@ -210,23 +210,25 @@ tool approvals are not supported: answer a tool call from the browser with `addT
 
 Each runtime lives in a scope of the injector tree, and `inject*()` returns the nearest one:
 
-| Function                 | Token                  | Provided by                                                |
-| ------------------------ | ---------------------- | ---------------------------------------------------------- |
-| `injectAssistant()`      | `NXA_ASSISTANT`        | a runtime provider, `provideAssistantScope(() => runtime)` |
-| `injectThread()`         | `NXA_THREAD`           | a runtime provider                                         |
-| `injectComposer()`       | `NXA_COMPOSER`         | the runtime (thread composer) or a message                 |
-| `injectMessage()`        | `NXA_MESSAGE`          | `provideMessageScope(() => message)`                       |
-| `injectMessageUi()`      | `NXA_MESSAGE_UI`       | `provideMessageScope(() => message)`                       |
-| `injectPart()`           | `NXA_PART`             | `providePartScope(() => part)`                             |
-| `injectAttachment()`     | `NXA_ATTACHMENT`       | `provideAttachmentScope(() => attachment)`                 |
-| `injectThreadList()`     | `NXA_THREAD_LIST`      | a runtime provider                                         |
-| `injectThreadListItem()` | `NXA_THREAD_LIST_ITEM` | `provideThreadListItemScope(() => item)`                   |
-| `injectSuggestion()`     | `NXA_SUGGESTION`       | `provideSuggestionScope(() => suggestion)`                 |
-| `injectToolCall()`       | `NXA_TOOL_CALL`        | `providePartScope(() => part)`, for a `tool-call` part     |
+| Function                   | Token                     | Provided by                                                |
+| -------------------------- | ------------------------- | ---------------------------------------------------------- |
+| `injectAssistant()`        | `NXA_ASSISTANT`           | a runtime provider, `provideAssistantScope(() => runtime)` |
+| `injectThread()`           | `NXA_THREAD`              | a runtime provider                                         |
+| `injectComposer()`         | `NXA_COMPOSER`            | the runtime (thread composer) or a message                 |
+| `injectMessage()`          | `NXA_MESSAGE`             | `provideMessageScope(() => message)`                       |
+| `injectMessageUi()`        | `NXA_MESSAGE_UI`          | `provideMessageScope(() => message)`                       |
+| `injectPart()`             | `NXA_PART`                | `providePartScope(() => part)`                             |
+| `injectAttachment()`       | `NXA_ATTACHMENT`          | `provideAttachmentScope(() => attachment)`                 |
+| `injectThreadList()`       | `NXA_THREAD_LIST`         | a runtime provider                                         |
+| `injectThreadListItem()`   | `NXA_THREAD_LIST_ITEM`    | `provideThreadListItemScope(() => item)`                   |
+| `injectThreadListItemUi()` | `NXA_THREAD_LIST_ITEM_UI` | `provideThreadListItemScope(() => item)`                   |
+| `injectSuggestion()`       | `NXA_SUGGESTION`          | `provideSuggestionScope(() => suggestion)`                 |
+| `injectToolCall()`         | `NXA_TOOL_CALL`           | `providePartScope(() => part)`, for a `tool-call` part     |
 
 Inside a message scope `injectComposer()` returns the message's edit composer; the thread composer
 stays reachable as `injectThread().composer`. `injectMessageUi()` holds the view state of the message
-that the runtime does not keep, as writable signals: `isHovering`, `isFocusWithin` and `isCopied`. A missing scope throws, unless you pass
+that the runtime does not keep, as writable signals: `isHovering`, `isFocusWithin` and `isCopied`;
+`injectThreadListItemUi()` does the same for a thread list item, with `isRenaming`. A missing scope throws, unless you pass
 `{ optional: true }` to get `null`. A nested runtime provider isolates its subtree from the outer
 scopes.
 
@@ -264,6 +266,7 @@ injectNxaEvent({ scope: 'thread', event: 'message.error' }, ({ messageId }) =>
 | `thread.historyWriteError`, `toolApprovalAnswered`              | `thread`, `threads`, `*`                        |
 | `composer.send`, `attachmentAdd`, `attachmentAddError`          | `composer`, `message`, `thread`, `threads`, `*` |
 | `message.error`                                                 | `message`, `thread`, `threads`, `*`             |
+| `message.copied`, `speak`, `reload`, `branchSwitched`           | `message`, `thread`, `threads`, `*`             |
 | `threads.selectionChanged`                                      | `threads`, `*`                                  |
 
 A plain event name is heard in the nearest scope of its source: `'composer.attachmentAdd'` inside
@@ -277,6 +280,10 @@ can write signals. Errors, thrown or rejected, go to Angular's `ErrorHandler`.
 
 - `composer.send` reports the composers' own sends, including the send that ends an edit (whose
   `messageId` is the edited message, not the one that replaces it), but not `thread.append(...)`.
+- `message.copied`, `message.speak`, `message.reload` and `message.branchSwitched` are reported by
+  the action bar and branch picker buttons (a successful copy, a click on speak, regenerate,
+  previous or next), with `{ threadId, messageId }`. Calling the runtime directly does not report
+  them. A nested runtime provider has its own.
 - `thread.initialize` also reaches a subscription that starts on, or follows the selection to, a
   thread that is already initialized, once.
 
@@ -512,8 +519,13 @@ inside a message scope, such as a row of `*nxaMessages`.
 import {
   NxaActionBarCopy,
   NxaActionBarEdit,
+  NxaActionBarExportMarkdown,
+  NxaActionBarFeedbackNegative,
+  NxaActionBarFeedbackPositive,
   NxaActionBarReload,
   NxaActionBarRoot,
+  NxaActionBarSpeak,
+  NxaActionBarStopSpeaking,
   NxaBranchPickerCount,
   NxaBranchPickerNext,
   NxaBranchPickerNumber,
@@ -536,6 +548,11 @@ import {
     <button nxaActionBarCopy>Copy</button>
     <button nxaActionBarEdit>Edit</button>
     <button nxaActionBarReload>Regenerate</button>
+    <button nxaActionBarFeedbackPositive aria-label="Helpful">👍</button>
+    <button nxaActionBarFeedbackNegative aria-label="Not helpful">👎</button>
+    <button *nxaMessageIf="{ speaking: false }; else stop" nxaActionBarSpeak>Read aloud</button>
+    <ng-template #stop><button nxaActionBarStopSpeaking>Stop</button></ng-template>
+    <button nxaActionBarExportMarkdown>Export</button>
   </div>
   <div nxaBranchPickerRoot hideWhenSingleBranch>
     <button nxaBranchPickerPrevious aria-label="Previous">‹</button>
@@ -545,17 +562,22 @@ import {
 </article>
 ```
 
-| Directive                         | Behavior                                                                                                                       |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `[nxaActionBarRoot]`              | Hides (`data-nxa-autohidden`, `hidden`) and floats (`data-nxa-floating`) by `autohide`, `autohideFloat` and `hideWhenRunning`. |
-| `button[nxaActionBarCopy]`        | Copies the message text, or the edit draft while editing. Sets `data-nxa-copied` and the message's `copied`.                   |
-| `button[nxaActionBarEdit]`        | Starts editing the message. Disabled while editing, or when the thread is disabled or cannot edit.                             |
-| `button[nxaActionBarReload]`      | Regenerates an assistant message as a new branch. Disabled during a run and for other messages.                                |
-| `[nxaBranchPickerRoot]`           | With `hideWhenSingleBranch`, carries `hidden` while the message has one branch.                                                |
-| `button[nxaBranchPickerPrevious]` | Shows the previous branch. Disabled on the first one, and during a run unless the runtime allows switching.                    |
-| `button[nxaBranchPickerNext]`     | Shows the next branch, with the same rules.                                                                                    |
-| `[nxaBranchPickerNumber]`         | Writes the 1-based number of the branch shown.                                                                                 |
-| `[nxaBranchPickerCount]`          | Writes the number of branches.                                                                                                 |
+| Directive                              | Behavior                                                                                                                       |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `[nxaActionBarRoot]`                   | Hides (`data-nxa-autohidden`, `hidden`) and floats (`data-nxa-floating`) by `autohide`, `autohideFloat` and `hideWhenRunning`. |
+| `button[nxaActionBarCopy]`             | Copies the message text, or the edit draft while editing. Sets `data-nxa-copied` and the message's `copied`.                   |
+| `button[nxaActionBarEdit]`             | Starts editing the message. Disabled while editing, or when the thread is disabled or cannot edit.                             |
+| `button[nxaActionBarReload]`           | Regenerates an assistant message as a new branch. Disabled during a run and for other messages.                                |
+| `button[nxaActionBarFeedbackPositive]` | Submits positive feedback. `aria-pressed` and `data-nxa-submitted` while the message's feedback is positive.                   |
+| `button[nxaActionBarFeedbackNegative]` | Submits negative feedback, with the same attributes for negative feedback.                                                     |
+| `button[nxaActionBarSpeak]`            | Reads the message aloud. Disabled without a speech adapter, while an assistant message runs, or without text.                  |
+| `button[nxaActionBarStopSpeaking]`     | Stops reading the message aloud. Disabled while the message is not the one being read.                                         |
+| `button[nxaActionBarExportMarkdown]`   | Downloads the message text as markdown, or hands it to `exportMarkdown`. Disabled like copy.                                   |
+| `[nxaBranchPickerRoot]`                | With `hideWhenSingleBranch`, carries `hidden` while the message has one branch.                                                |
+| `button[nxaBranchPickerPrevious]`      | Shows the previous branch. Disabled on the first one, and during a run unless the runtime allows switching.                    |
+| `button[nxaBranchPickerNext]`          | Shows the next branch, with the same rules.                                                                                    |
+| `[nxaBranchPickerNumber]`              | Writes the 1-based number of the branch shown.                                                                                 |
+| `[nxaBranchPickerCount]`               | Writes the number of branches.                                                                                                 |
 
 `nxaActionBarRoot` options: `autohide` is `'never'` (default), `'always'` (out of sight unless the
 pointer is over the message or the keyboard focus is inside it, as tracked by `nxaMessageRoot`) or
@@ -584,6 +606,16 @@ so browsers that require a user gesture accept it. A failed write, or one that c
 button is gone, leaves the message as it was. The copy is disabled while an assistant message is
 still running or the message has no text. The copied state belongs to the message, so copy buttons
 of the same message share it.
+
+The feedback buttons call the runtime's `FeedbackAdapter` (`adapters.feedback`); without one the
+feedback is still recorded on the assistant message, so the buttons stay enabled. Speech needs a
+`SpeechSynthesisAdapter` (`adapters.speech`, for example `new WebSpeechSynthesisAdapter()`);
+reading another message stops the current one. `*nxaMessageIf="{ speaking: true }"` and
+`{ submittedFeedback: 'positive' }` follow the same state.
+
+`nxaActionBarExportMarkdown` options: `filename` (default `message-<timestamp>.md`) and
+`exportMarkdown`, a function that receives the text instead of the download, for example to save
+it elsewhere. A failed export is reported with `console.error`.
 
 Every button takes `disabled` on top of its own state, and a capture-phase listener can veto its
 click with `event.preventDefault()`.
@@ -666,12 +698,16 @@ a string error as is, the `message` of an error object, any other value as is, o
 
 ## Thread list primitives
 
-Headless directives for the list of threads: switching, creating, archiving and deleting them.
+Headless directives for the list of threads: switching, creating, renaming, archiving and deleting
+them.
 
 ```ts
 import {
   NxaThreadListItemArchive,
   NxaThreadListItemDelete,
+  NxaThreadListItemIf,
+  NxaThreadListItemRename,
+  NxaThreadListItemRenameInput,
   NxaThreadListItemRoot,
   NxaThreadListItems,
   NxaThreadListItemTitle,
@@ -687,9 +723,17 @@ import {
 <nav nxaThreadListRoot>
   <button nxaThreadListNew>New chat</button>
   <div *nxaThreadListItems="let thread" nxaThreadListItemRoot>
-    <button nxaThreadListItemTrigger>
-      <span nxaThreadListItemTitle fallback="New chat"></span>
-    </button>
+    <input
+      *nxaThreadListItemIf="{ renaming: true }; else trigger"
+      nxaThreadListItemRenameInput
+      aria-label="Rename thread"
+    />
+    <ng-template #trigger>
+      <button nxaThreadListItemTrigger>
+        <span nxaThreadListItemTitle fallback="New chat"></span>
+      </button>
+    </ng-template>
+    <button nxaThreadListItemRename>Rename</button>
     <button nxaThreadListItemArchive>Archive</button>
     <button nxaThreadListItemDelete>Delete</button>
   </div>
@@ -702,18 +746,21 @@ import {
 </nav>
 ```
 
-| Directive                            | Behavior                                                                                                                        |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| `[nxaThreadListRoot]`                | Collects the item triggers inside it for the arrow keys.                                                                        |
-| `button[nxaThreadListNew]`           | Switches to a new thread; `data-active` and `aria-current` while the new thread is the main one.                                |
-| `button[nxaThreadListLoadMore]`      | Loads more threads; disabled while there are none or a load is in flight.                                                       |
-| `*nxaThreadListItems`                | One row per thread, or per archived thread with `archived: true`, each a thread list item scope.                                |
-| `[nxaThreadListItemRoot]`            | `data-active` and `aria-current` on the main thread; ArrowDown and ArrowUp on its trigger move to the next or previous trigger. |
-| `button[nxaThreadListItemTrigger]`   | Switches to the row's thread; `data-active` and `aria-current` while it is the main one.                                        |
-| `[nxaThreadListItemTitle]`           | The thread title as text, or `fallback` while it has none. Exported as `nxaThreadListItemTitle`, with `title()`.                |
-| `button[nxaThreadListItemArchive]`   | Archives the row's thread.                                                                                                      |
-| `button[nxaThreadListItemUnarchive]` | Restores the row's archived thread; disabled while the thread list cannot restore threads.                                      |
-| `button[nxaThreadListItemDelete]`    | Deletes the row's thread.                                                                                                       |
+| Directive                             | Behavior                                                                                                                        |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `[nxaThreadListRoot]`                 | Collects the item triggers inside it for the arrow keys.                                                                        |
+| `button[nxaThreadListNew]`            | Switches to a new thread; `data-active` and `aria-current` while the new thread is the main one.                                |
+| `button[nxaThreadListLoadMore]`       | Loads more threads; disabled while there are none or a load is in flight.                                                       |
+| `*nxaThreadListItems`                 | One row per thread, or per archived thread with `archived: true`, each a thread list item scope.                                |
+| `[nxaThreadListItemRoot]`             | `data-active` and `aria-current` on the main thread; ArrowDown and ArrowUp on its trigger move to the next or previous trigger. |
+| `button[nxaThreadListItemTrigger]`    | Switches to the row's thread; `data-active` and `aria-current` while it is the main one.                                        |
+| `[nxaThreadListItemTitle]`            | The thread title as text, or `fallback` while it has none. Exported as `nxaThreadListItemTitle`, with `title()`.                |
+| `button[nxaThreadListItemArchive]`    | Archives the row's thread.                                                                                                      |
+| `button[nxaThreadListItemUnarchive]`  | Restores the row's archived thread; disabled while the thread list cannot restore threads.                                      |
+| `button[nxaThreadListItemDelete]`     | Deletes the row's thread.                                                                                                       |
+| `button[nxaThreadListItemRename]`     | Starts editing the row's title (`injectThreadListItemUi().isRenaming`); the root carries `data-nxa-renaming` meanwhile.         |
+| `input[nxaThreadListItemRenameInput]` | Edits the title: starts with it, focused and selected; Enter or blur renames, Escape cancels.                                   |
+| `*nxaThreadListItemIf`                | Renders while the row meets every condition given (`renaming`, `main`, `archived`), and `else` otherwise.                       |
 
 The list gives `let thread` as a `Signal` of the thread list item state, plus `index`, `count`,
 `first` and `last`. A row follows its thread by id: archiving, deleting or adding another thread
@@ -722,6 +769,14 @@ skip disabled triggers, do not wrap and leave keys with a modifier alone; a `key
 the move. A failed action is reported with `console.error`. The runtime decides which threads
 exist: `provideRemoteThreadListRuntime` lists those of its adapter, `provideExternalStoreRuntime`
 those of its `adapters.threadList`, while `provideLocalRuntime` keeps a single thread and lists none.
+
+The rename input confirms the value without the spaces at its ends; a blank value or the current
+title only ends the editing. Enter and Escape are ignored during an IME composition, and a
+capture-phase `keydown` listener can veto them. After Enter or Escape the focus returns to the row's
+trigger, unless the user has moved it elsewhere meanwhile. A rename the runtime rejects keeps the
+input open, with what was typed, and is reported with `console.error`. An input left in the DOM
+outside `*nxaThreadListItemIf` starts afresh, with the current title, each time editing starts. Editing ends by setting `isRenaming` to `false`, so a menu can start and
+end it through `injectThreadListItemUi()` as well.
 
 ## Suggestion primitives
 

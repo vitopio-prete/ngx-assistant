@@ -22,6 +22,7 @@ import {
   injectMessage,
   injectThread,
 } from './scopes';
+import { NXA_MESSAGE_UI_EVENTS, type MessageUiEventName } from './ui-events';
 
 /** The events `injectNxaEvent()` delivers, by name, with their payloads. */
 export interface NxaEvents {
@@ -70,6 +71,17 @@ export interface NxaEvents {
   };
   /** A message entered the error status. */
   'message.error': { threadId: string; messageId: string; reason: 'error' };
+  /** `nxaActionBarCopy` copied a message. */
+  'message.copied': { threadId: string; messageId: string };
+  /** `nxaActionBarSpeak` was clicked to read a message aloud. Reported before the runtime call. */
+  'message.speak': { threadId: string; messageId: string };
+  /** `nxaActionBarReload` was clicked to regenerate a message. Reported before the runtime call. */
+  'message.reload': { threadId: string; messageId: string };
+  /**
+   * `nxaBranchPickerPrevious` or `nxaBranchPickerNext` was clicked to switch the branch of a
+   * message. Reported before the runtime call.
+   */
+  'message.branchSwitched': { threadId: string; messageId: string };
   /** The main thread changed. It does not fire for the thread selected at first. */
   'threads.selectionChanged': { threadId: string; previousThreadId: string };
 }
@@ -111,6 +123,7 @@ export interface NxaEventRef {
 
 const THREAD_SCOPES = ['thread', 'threads', '*'] as const;
 const COMPOSER_SCOPES = ['composer', 'message', 'thread', 'threads', '*'] as const;
+const MESSAGE_SCOPES = ['message', 'thread', 'threads', '*'] as const;
 
 // The scopes each event can be heard in. It is also the list of known events.
 const SCOPES: { readonly [E in NxaEventName]: readonly NxaEventScope<E>[] } = {
@@ -123,7 +136,11 @@ const SCOPES: { readonly [E in NxaEventName]: readonly NxaEventScope<E>[] } = {
   'composer.send': COMPOSER_SCOPES,
   'composer.attachmentAdd': COMPOSER_SCOPES,
   'composer.attachmentAddError': COMPOSER_SCOPES,
-  'message.error': ['message', 'thread', 'threads', '*'],
+  'message.error': MESSAGE_SCOPES,
+  'message.copied': MESSAGE_SCOPES,
+  'message.speak': MESSAGE_SCOPES,
+  'message.reload': MESSAGE_SCOPES,
+  'message.branchSwitched': MESSAGE_SCOPES,
   'threads.selectionChanged': ['threads', '*'],
 };
 
@@ -141,6 +158,14 @@ const COMPOSER_EVENTS = {
   'composer.attachmentAdd': 'attachmentAdd',
   'composer.attachmentAddError': 'attachmentAddError',
 } as const;
+
+// Reported by the primitives, not by the runtime. A call to the runtime does not report them.
+const UI_EVENTS = new Set<string>([
+  'message.copied',
+  'message.speak',
+  'message.reload',
+  'message.branchSwitched',
+] satisfies MessageUiEventName[]);
 
 // Thread lists report these for the threads that are not the main one.
 const LIFECYCLE_EVENTS = new Set<string>([
@@ -277,7 +302,33 @@ function bind(event: string, scope: string, emit: Emit): Unsubscribe {
     return bindThreadMessageErrors(thread, emit);
   }
 
+  if (UI_EVENTS.has(event)) return bindMessageUiEvents(event, scope, emit);
+
   return bindSelection(injectAssistant().threads, emit);
+}
+
+const currentMessageId = (message: MessageRuntime) => {
+  try {
+    return message.getState().id;
+  } catch {
+    return undefined; // the message is gone
+  }
+};
+
+// The primitives report to the events of their assistant scope; a scope narrows them down by the
+// thread and message it shows at the time of the event.
+function bindMessageUiEvents(event: string, scope: string, emit: Emit): Unsubscribe {
+  const message = scope === 'message' ? injectMessage() : null;
+  const thread = scope === 'message' || scope === 'thread' ? injectThread() : null;
+  if (!thread) injectAssistant(); // throws outside an assistant scope
+  const events = inject(NXA_MESSAGE_UI_EVENTS, { optional: true });
+  if (!events) return () => undefined;
+  return events.on(({ name, threadId, messageId }) => {
+    if (name !== event) return;
+    if (thread && thread.getState().threadId !== threadId) return;
+    if (message && currentMessageId(message) !== messageId) return;
+    emit({ threadId, messageId });
+  });
 }
 
 const threadIdOf = (thread: ThreadRuntime) => thread.getState().threadId;

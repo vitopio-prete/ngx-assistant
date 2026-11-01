@@ -9,7 +9,8 @@ import {
   numberAttribute,
 } from '@angular/core';
 import { fromRuntime } from '../from-runtime';
-import { injectMessage, injectMessageUi } from '../scopes';
+import { injectMessage, injectMessageUi, injectThread } from '../scopes';
+import { NXA_MESSAGE_UI_EVENTS, emitMessageUiEvent } from '../ui-events';
 import { copyDisabled } from './action-state';
 
 /** Writes text to the clipboard. A rejection or a throw counts as a failed copy. */
@@ -32,7 +33,8 @@ const writeToClipboard: NxaCopyToClipboard = (text) => {
  *
  * The clipboard is written inside the click, so browsers that tie clipboard access to a user
  * gesture accept it. A failed write leaves the message as it was. A write that completes after the
- * button is destroyed, or after its scope moved to another message, is ignored. The copied state
+ * button is destroyed, or after its scope moved to another message, is ignored. A successful copy
+ * reports `message.copied` to `injectNxaEvent()`. The copied state
  * belongs to the message, so copy buttons of the same message share it.
  *
  * @example
@@ -57,7 +59,10 @@ export class NxaActionBarCopy {
   /** Disables the button on top of the message state. */
   readonly disabled = input(false, { transform: booleanAttribute });
 
+  // Only for the event: a copy button also works in a message scope without a thread.
+  private readonly thread = injectThread({ optional: true });
   private readonly message = injectMessage();
+  private readonly events = inject(NXA_MESSAGE_UI_EVENTS, { optional: true });
   private readonly ui = injectMessageUi();
   private readonly messageId = fromRuntime(this.message, (s) => s.id);
   private readonly nothingToCopy = copyDisabled(this.message);
@@ -98,6 +103,9 @@ export class NxaActionBarCopy {
         if (generation !== this.generation || this.message.getState().id !== id) return;
         clearTimeout(this.timer);
         this.ui.isCopied.set(true);
+        if (this.thread) {
+          emitMessageUiEvent(this.events, this.thread, this.message, 'message.copied');
+        }
         this.timer = setTimeout(() => {
           this.timer = undefined;
           this.ui.isCopied.set(false);
