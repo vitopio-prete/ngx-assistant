@@ -1,0 +1,21 @@
+/*
+ * The styled ngx-assistant components. They are meant to be copied into your app and changed
+ * there: every file depends only on @ngx-assistant/angular, markdown-it and Tailwind.
+ */
+
+export * from './icons';
+export * from './thread/thread';
+export * from './thread/thread-welcome';
+export * from './thread/composer';
+export * from './thread/attachment';
+export * from './thread/user-message';
+export * from './thread/assistant-message';
+export * from './thread/edit-composer';
+export * from './thread/branch-picker';
+export * from './thread/markdown-text';
+export * from './thread/reasoning';
+export * from './thread/tool-fallback';
+export * from './thread/tool-approval';
+export * from './thread/message-error';
+export * from './thread/message-file';
+export * from './thread/focus-keeper';

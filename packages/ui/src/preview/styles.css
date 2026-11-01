@@ -1,0 +1,18 @@
+@import 'tailwindcss' source('../');
+@import '../lib/styles/nxa-theme.css';
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--nxa-background);
+  color: var(--nxa-foreground);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+}
