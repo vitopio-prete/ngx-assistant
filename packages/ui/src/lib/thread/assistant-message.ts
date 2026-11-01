@@ -1,14 +1,22 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
+import { ChangeDetectionStrategy, Component, computed } from '@angular/core';
 import {
   NxaActionBarCopy,
+  NxaActionBarExportMarkdown,
+  NxaActionBarFeedbackNegative,
+  NxaActionBarFeedbackPositive,
   NxaActionBarReload,
   NxaActionBarRoot,
+  NxaActionBarSpeak,
+  NxaActionBarStopSpeaking,
   NxaMessageIf,
   NxaMessageParts,
   fromRuntime,
   injectMessage,
+  injectThread,
 } from '@ngx-assistant/angular';
 import { NxaIcon } from '../icons';
+import { MENU_BELOW, MENU_ITEM, MENU_PANEL } from '../menu/menu';
 import { ACTION_BAR, ACTION_BUTTON } from './action-button';
 import { NxaBranchPicker } from './branch-picker';
 import { NxaMarkdownText } from './markdown-text';
@@ -20,7 +28,9 @@ import { NxaToolFallback } from './tool-fallback';
 /**
  * An assistant reply: text as markdown, reasoning in a disclosure, tool calls with the UI the app
  * registers (`provideToolUi`) or the fallback, files, the error of a failed run, and below it the
- * branch picker and the Copy and Regenerate actions.
+ * branch picker and the actions: Copy, Helpful / Not helpful (when the runtime has a feedback
+ * adapter), Regenerate, and a More menu with Export as Markdown and Read aloud (when the runtime
+ * has a speech adapter).
  */
 @Component({
   selector: 'nxa-assistant-message',
@@ -30,7 +40,15 @@ import { NxaToolFallback } from './tool-fallback';
     NxaMessageIf,
     NxaActionBarRoot,
     NxaActionBarCopy,
+    NxaActionBarFeedbackPositive,
+    NxaActionBarFeedbackNegative,
     NxaActionBarReload,
+    NxaActionBarExportMarkdown,
+    NxaActionBarSpeak,
+    NxaActionBarStopSpeaking,
+    CdkMenuTrigger,
+    CdkMenu,
+    CdkMenuItem,
     NxaBranchPicker,
     NxaMarkdownText,
     NxaReasoning,
@@ -83,16 +101,97 @@ import { NxaToolFallback } from './tool-fallback';
           <nxa-icon *nxaMessageIf="{ copied: true }; else copy" name="check" class="size-3.5" />
           <ng-template #copy><nxa-icon name="copy" class="size-3.5" /></ng-template>
         </button>
+        @if (canFeedback()) {
+          <button
+            nxaActionBarFeedbackPositive
+            [class]="toggle"
+            aria-label="Helpful"
+            title="Helpful"
+          >
+            <nxa-icon name="thumbs-up" class="size-3.5" />
+          </button>
+          <button
+            nxaActionBarFeedbackNegative
+            [class]="toggle"
+            aria-label="Not helpful"
+            title="Not helpful"
+          >
+            <nxa-icon name="thumbs-down" class="size-3.5" />
+          </button>
+        }
         <button nxaActionBarReload [class]="button" aria-label="Regenerate" title="Regenerate">
           <nxa-icon name="refresh" class="size-3.5" />
         </button>
+        <!-- Export and Read aloud need text: a menu of disabled items could not take the focus. -->
+        @if (hasText()) {
+          <button
+            type="button"
+            [cdkMenuTriggerFor]="more"
+            [cdkMenuPosition]="below"
+            [class]="button"
+            aria-label="More actions"
+            title="More actions"
+            data-slot="assistant-message-more"
+          >
+            <nxa-icon name="more" class="size-3.5" />
+          </button>
+        }
       </div>
+      <ng-template #more>
+        <div cdkMenu data-slot="assistant-message-menu" [class]="panel">
+          <button
+            cdkMenuItem
+            nxaActionBarExportMarkdown
+            data-slot="assistant-message-menu-item"
+            [class]="item"
+          >
+            <nxa-icon name="download" class="size-4" />
+            Export as Markdown
+          </button>
+          @if (canSpeak()) {
+            <button
+              *nxaMessageIf="{ speaking: false }; else stop"
+              cdkMenuItem
+              nxaActionBarSpeak
+              data-slot="assistant-message-menu-item"
+              [class]="item"
+            >
+              <nxa-icon name="volume" class="size-4" />
+              Read aloud
+            </button>
+            <ng-template #stop>
+              <button
+                cdkMenuItem
+                nxaActionBarStopSpeaking
+                data-slot="assistant-message-menu-item"
+                [class]="item"
+              >
+                <nxa-icon name="stop" class="size-4" />
+                Stop reading
+              </button>
+            </ng-template>
+          }
+        </div>
+      </ng-template>
     </div>
   `,
 })
 export class NxaAssistantMessage {
   protected readonly button = ACTION_BUTTON;
+  protected readonly toggle = `${ACTION_BUTTON} aria-pressed:bg-nxa-accent aria-pressed:text-nxa-foreground`;
   protected readonly actionBar = ACTION_BAR;
+  protected readonly panel = MENU_PANEL;
+  protected readonly item = MENU_ITEM;
+  protected readonly below = MENU_BELOW;
+  private readonly capabilities = fromRuntime(injectThread(), (s) => s.capabilities);
+  /** The runtime records feedback: show Helpful and Not helpful. */
+  protected readonly canFeedback = computed(() => this.capabilities().feedback);
+  /** The runtime reads aloud: offer it in the More menu. */
+  protected readonly canSpeak = computed(() => this.capabilities().speech);
+  /** The reply has text to export or read aloud. */
+  protected readonly hasText = fromRuntime(injectMessage(), (s) =>
+    s.content.some((part) => part.type === 'text' && part.text.trim() !== ''),
+  );
   /** The reply has started but has no content yet. */
   protected readonly waiting = fromRuntime(
     injectMessage(),
