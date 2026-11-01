@@ -25,3 +25,5 @@ export * from './thread-list/thread-list-item';
 export * from './thread-list/thread-list';
 export * from './assistant-modal/modal-size';
 export * from './assistant-modal/assistant-modal';
+export * from './model-selector/model-selector';
+export * from './tool-ui/approval-card';
