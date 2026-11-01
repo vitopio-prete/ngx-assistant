@@ -23,3 +23,5 @@ export * from './menu/menu';
 export * from './thread-list/thread-list-groups';
 export * from './thread-list/thread-list-item';
 export * from './thread-list/thread-list';
+export * from './assistant-modal/modal-size';
+export * from './assistant-modal/assistant-modal';
