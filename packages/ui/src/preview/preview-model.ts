@@ -18,7 +18,7 @@ const answer = 42;
 | reasoning | nxa-reasoning |
 | tool call | nxa-tool-fallback |
 
-> Try \`/reasoning\`, \`/tool\`, \`/approval\`, \`/question\` or \`/error\`.`;
+> Try \`/reasoning\`, \`/tool\`, \`/approval\`, \`/approval-card\`, \`/question\` or \`/error\`.`;
 
 const sleep = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
@@ -98,6 +98,29 @@ export const previewModel: ChatModelAdapter = {
           timing: { startedAt, completedAt: Date.now() },
         },
       ]);
+      return;
+    }
+    if (prompt.includes('/approval-card')) {
+      yield {
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'publish',
+            toolName: 'publish_release',
+            args: { version: '0.1.0', tag: 'latest' },
+            argsText: '{"version":"0.1.0","tag":"latest"}',
+            approval: {
+              id: 'publish-1',
+              options: [
+                { id: 'once', kind: 'allow-once' },
+                { id: 'always', kind: 'allow-always' },
+                { id: 'never', kind: 'reject-once' },
+              ],
+            },
+          },
+        ],
+        status: { type: 'requires-action', reason: 'tool-calls' },
+      };
       return;
     }
     if (prompt.includes('/approval') || prompt.includes('/question')) {
