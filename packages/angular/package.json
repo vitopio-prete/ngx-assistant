@@ -20,5 +20,6 @@
   "devDependencies": {
     "@ngx-assistant/engine": "workspace:*"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "schematics": "./schematics/collection.json"
 }

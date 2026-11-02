@@ -1,0 +1,22 @@
+{
+  "thread": {
+    "description": "The whole chat: messages, composer, action bar, branch picker, reasoning, tool calls.",
+    "entries": ["thread/thread.ts"]
+  },
+  "thread-list": {
+    "description": "A sidebar with the threads, grouped by day, with a menu and inline rename per row.",
+    "entries": ["thread-list/thread-list.ts"]
+  },
+  "assistant-modal": {
+    "description": "A floating chat that opens from a button, with the thread and its thread list.",
+    "entries": ["assistant-modal/assistant-modal.ts"]
+  },
+  "model-selector": {
+    "description": "A menu to pick the model of the next run.",
+    "entries": ["model-selector/model-selector.ts"]
+  },
+  "approval-card": {
+    "description": "A card that asks the user to approve a tool call, to use in a tool UI.",
+    "entries": ["tool-ui/approval-card.ts"]
+  }
+}

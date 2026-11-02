@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "$id": "NgxAssistantComponents",
+  "title": "Copy ngx-assistant components",
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "The application to copy the components into.",
+      "$default": { "$source": "projectName" }
+    },
+    "path": {
+      "type": "string",
+      "description": "The folder of the components, relative to the source root of the application.",
+      "default": "app/chat"
+    },
+    "overwrite": {
+      "type": "boolean",
+      "description": "Replace the files that differ from the ones of this version, losing your changes.",
+      "default": false
+    },
+    "skipInstall": {
+      "type": "boolean",
+      "description": "Add the packages the components need to package.json without installing them.",
+      "default": false
+    }
+  }
+}
