@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "$id": "NgxAssistantNgAdd",
+  "title": "Set up ngx-assistant",
+  "type": "object",
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "The application to set up.",
+      "$default": { "$source": "projectName" }
+    },
+    "runtime": {
+      "type": "string",
+      "description": "The runtime of the chat.",
+      "enum": ["data-stream", "local"],
+      "default": "data-stream",
+      "x-prompt": {
+        "message": "Which runtime should the chat use?",
+        "type": "list",
+        "items": [
+          { "value": "data-stream", "label": "Data stream: a backend that streams the replies" },
+          { "value": "local", "label": "Local: a chat model adapter that runs in the browser" }
+        ]
+      }
+    },
+    "api": {
+      "type": "string",
+      "description": "The URL of the backend of the data stream runtime.",
+      "default": "/api/chat"
+    },
+    "components": {
+      "type": "boolean",
+      "description": "Copy the chat thread components into the app.",
+      "default": true,
+      "x-prompt": "Add the styled chat components to the app?"
+    },
+    "path": {
+      "type": "string",
+      "description": "The folder of the components, relative to the source root of the application.",
+      "default": "app/chat"
+    },
+    "skipTailwind": {
+      "type": "boolean",
+      "description": "Leave the Tailwind CSS setup to you.",
+      "default": false
+    },
+    "skipInstall": {
+      "type": "boolean",
+      "description": "Add the packages to package.json without installing them.",
+      "default": false
+    }
+  }
+}

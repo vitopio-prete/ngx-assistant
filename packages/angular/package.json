@@ -21,5 +21,8 @@
     "@ngx-assistant/engine": "workspace:*"
   },
   "sideEffects": false,
-  "schematics": "./schematics/collection.json"
+  "schematics": "./schematics/collection.json",
+  "ng-add": {
+    "save": "dependencies"
+  }
 }
