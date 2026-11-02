@@ -1,6 +1,7 @@
 // End-to-end check of the production demo bundle in jsdom, against the backend it ships: the
 // thread, its branches, editing, regenerating, copying, attachments, errors, suggestions, tool
-// calls with an approval, the model picker, the thread list, and what a reload brings back.
+// calls with an approval, the model selector, the thread list and its row menu, the assistant
+// modal, the theme, and what a reload brings back.
 // Every request to the backend is recorded and checked.
 // Run after `ng build demo`. Exits with a non-zero code on the first failed check.
 import assert from 'node:assert/strict';
@@ -96,38 +97,77 @@ function openPage(storage = {}) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const text = (element) => element?.textContent.replace(/\s+/g, ' ').trim() ?? '';
 
-const chat = () => document.querySelector('nxa-demo-chat');
+const chat = () => document.querySelector('nxa-thread');
 const $ = (selector) => chat().querySelector(selector);
 const $$ = (selector) => [...chat().querySelectorAll(selector)];
 const input = () => $('textarea[aria-label="Message"]');
-const sendButton = () => $('.composer .primary');
-const stopButton = () => $('.composer .secondary');
+const sendButton = () => $('button[aria-label="Send"]');
+const stopButton = () => $('button[aria-label="Stop"]');
 const isRunning = () => stopButton() !== null;
-const articles = (role) => $$(`article${role ? `[data-role="${role}"]` : ''}`);
-const messageText = (article) => text(article.querySelector('.bubble'));
+const articles = (role) =>
+  $$(`[data-slot="thread-messages"] > [data-role${role ? `="${role}"` : ''}]`);
+/** The text of a message: what the user wrote, or the text parts of a reply (not its reasoning). */
+const messageText = (article) =>
+  article.dataset.role === 'user'
+    ? text(article.querySelector('[data-slot="user-message-content"]'))
+    : [...article.querySelectorAll('[data-slot="assistant-message-content"] > nxa-markdown-text')]
+        .map(text)
+        .join(' ');
 const messages = () =>
   articles().map((article) => ({ role: article.dataset.role, text: messageText(article) }));
 const lastAssistant = () => articles('assistant').at(-1);
 const lastReply = () => (lastAssistant() ? messageText(lastAssistant()) : '');
-const lastText = () =>
-  lastAssistant() ? [...lastAssistant().querySelectorAll('.text')].map(text).join(' ') : '';
-const branch = (article) => text(article.querySelector('.branch-label'));
-const button = (root, label) => [...root.querySelectorAll('button')].find((b) => text(b) === label);
+const branch = (article) => text(article.querySelector('[data-slot="branch-picker"]'));
+const actionBar = (article) => article.querySelector('[nxaActionBarRoot]');
+/** The button named `label`, by its accessible name or its text. */
+const button = (root, label) =>
+  [...root.querySelectorAll('button')].find(
+    (b) => b.getAttribute('aria-label') === label || text(b) === label,
+  );
+const welcome = () => $('[data-slot="thread-welcome"]');
+const suggestions = () => $$('[nxaSuggestionTrigger]');
+const composerForm = () => $('form[nxaComposerRoot]');
+const attachmentName = (attachment) => text(attachment.querySelector('.min-w-0 > span'));
 
-const sidebar = () => document.querySelector('nxa-demo-thread-sidebar');
-const threadItems = () => [...sidebar().querySelectorAll('.thread-list > .thread-item')];
-const archivedItems = () => [...sidebar().querySelectorAll('.archived .thread-item')];
-const threadTitles = () => threadItems().map((item) => text(item.querySelector('.thread-trigger')));
-const activeTitle = () =>
-  text(sidebar().querySelector('.thread-item[data-active] .thread-trigger'));
+const sidebar = () => document.querySelector('nxa-thread-list');
+const threadItems = () => [
+  ...sidebar().querySelectorAll('nxa-thread-list-items nxa-thread-list-item'),
+];
+const archivedItems = () => [
+  ...sidebar().querySelectorAll('nxa-thread-list-archived nxa-thread-list-item'),
+];
+const itemTitle = (item) => text(item.querySelector('[data-slot="thread-list-item-title"]'));
+const threadTitles = () => threadItems().map(itemTitle);
+const activeTitle = () => {
+  const active = threadItems().find((item) => item.hasAttribute('data-active'));
+  return active ? itemTitle(active) : '';
+};
+const newThread = () => sidebar().querySelector('[data-slot="thread-list-new"]');
 const openThread = (title) =>
   threadItems()
-    .find((item) => text(item.querySelector('.thread-trigger')) === title)
-    .querySelector('.thread-trigger')
+    .find((item) => itemTitle(item) === title)
+    .querySelector('[data-slot="thread-list-item-trigger"]')
     .click();
 
-const picker = () => document.querySelector('nxa-demo-model-picker');
-const modelTrigger = () => picker().querySelector('.model-trigger');
+/** Picks `action` in the menu of a thread list row. */
+async function threadAction(item, action) {
+  button(item, 'More options').click();
+  const menu = () => document.querySelector('[data-slot="thread-list-item-menu"]');
+  await waitFor(menu, 'the thread menu');
+  button(menu(), action).click();
+  await waitFor(() => !menu(), 'the thread menu to close');
+}
+
+/** Opens the archived threads, which start collapsed. */
+async function showArchived() {
+  const toggle = () => sidebar().querySelector('nxa-thread-list-archived > button');
+  await waitFor(toggle, 'the archived section');
+  if (toggle().getAttribute('aria-expanded') !== 'true') toggle().click();
+  await waitFor(() => archivedItems().length > 0, 'the archived threads');
+}
+
+const picker = () => document.querySelector('nxa-model-selector');
+const modelTrigger = () => picker().querySelector('[data-slot="model-selector-trigger"]');
 
 /** The requests to `/api/chat` made since `from`, with their bodies. */
 const chatRequests = (from = 0) =>
@@ -146,7 +186,7 @@ async function waitFor(check, what, timeout = 5000) {
 // A run is over once the thread stops and every text is shown in full (the text is revealed a few
 // characters per frame, and may still be catching up when the stream ends).
 const settled = () =>
-  !isRunning() && !document.querySelector('[nxaMessagePartText][data-nxa-status="running"]');
+  !isRunning() && !document.querySelector('nxa-markdown-text[data-nxa-status="running"]');
 const idle = () => waitFor(settled, 'the run to finish');
 
 function type(value, target = input()) {
@@ -170,7 +210,7 @@ function drop(...files) {
   Object.defineProperty(event, 'dataTransfer', {
     value: { types: ['Files'], files, dropEffect: 'none' },
   });
-  $('.composer').dispatchEvent(event);
+  composerForm().dispatchEvent(event);
 }
 
 /** Waits until `start` triggered a request to `/api/chat`, then until its run is over. */
@@ -190,14 +230,14 @@ async function send(value) {
 
 /** Picks a model in the header, then its effort level when given. */
 async function pickModel(name, effort) {
-  const content = picker().querySelector('.model-content');
+  const content = picker().querySelector('[data-slot="model-selector-content"]');
   const open = async () => {
     modelTrigger().click();
     await waitFor(() => !content.hidden, 'the model list');
   };
   await open();
-  [...content.querySelectorAll('.model-item')]
-    .find((item) => text(item.querySelector('strong')) === name)
+  [...content.querySelectorAll('[data-slot="model-selector-item"]')]
+    .find((item) => text(item.querySelector('span')) === name)
     .click();
   await waitFor(() => content.hidden, 'the model list to close');
   if (!effort) return;
@@ -225,13 +265,13 @@ await check('the app mounts on a new conversation, with suggestions', async () =
     ['GET /api/threads'],
   );
   assert.deepEqual(threadTitles(), []);
-  assert.equal(sidebar().querySelector('.new-thread').dataset.active, 'true');
-  await waitFor(() => $('.welcome'), 'the welcome screen');
+  assert.equal(newThread().dataset.active, 'true');
+  await waitFor(() => welcome(), 'the welcome screen');
   assert.deepEqual(
-    $$('.suggestion').map((s) => text(s.querySelector('strong'))),
+    suggestions().map((s) => text(s.querySelector('[nxaSuggestionTitle]'))),
     ['Say hello', 'Check the weather', 'Send an email', 'Show an error'],
   );
-  assert.equal(text(modelTrigger()), 'Echo');
+  assert.equal(modelTrigger().getAttribute('aria-label'), 'Model: Echo');
   assert.equal(sendButton().disabled, true);
   assert.equal(isRunning(), false);
   assert.deepEqual(messages(), []);
@@ -239,14 +279,14 @@ await check('the app mounts on a new conversation, with suggestions', async () =
 });
 
 await check('the first message saves the conversation, which the backend names', async () => {
-  $$('.suggestion')[0].click();
+  suggestions()[0].click();
   await waitFor(isRunning, 'the run to start');
   await idle();
   assert.deepEqual(messages(), [
     { role: 'user', text: 'Hello there!' },
     { role: 'assistant', text: 'Echo: Hello there!' },
   ]);
-  assert.equal($('.welcome'), null);
+  assert.equal(welcome(), null);
   await waitFor(() => threadTitles()[0] === 'Hello there!', 'the generated title');
   assert.equal(activeTitle(), 'Hello there!');
 
@@ -333,11 +373,11 @@ await check('after Stop the thread accepts a new message, in order', async () =>
 });
 
 await check(
-  'user messages always show their actions, earlier replies on hover or focus',
+  'the last reply always shows its actions, earlier messages on hover or focus',
   async () => {
-    const bar = (article) => article.querySelector('.action-bar');
+    const bar = actionBar;
     const autohidden = (article) => bar(article).hasAttribute('data-nxa-autohidden');
-    assert.ok(articles('user').every((article) => !autohidden(article)));
+    assert.ok(articles('user').every(autohidden));
     assert.equal(autohidden(lastAssistant()), false);
     const earlier = articles('assistant')[0];
     assert.equal(autohidden(earlier), true);
@@ -358,13 +398,13 @@ await check(
 
 await check('Regenerate adds a branch, and the branch picker moves between them', async () => {
   const reply = lastAssistant();
-  assert.equal(reply.querySelector('.branch-picker').hidden, true);
+  assert.equal(reply.querySelector('[data-slot="branch-picker"]').hidden, true);
   button(reply, 'Regenerate').click();
   await waitFor(isRunning, 'the regeneration to start');
-  await waitFor(() => lastAssistant().querySelector('.action-bar').hidden, 'the actions to hide');
+  await waitFor(() => actionBar(lastAssistant()).hidden, 'the actions to hide');
   await idle();
   assert.equal(lastReply(), 'Echo (2): second message');
-  const picker = lastAssistant().querySelector('.branch-picker');
+  const picker = lastAssistant().querySelector('[data-slot="branch-picker"]');
   assert.equal(picker.hidden, false);
   assert.equal(branch(lastAssistant()), '2 / 2');
 
@@ -413,7 +453,6 @@ await check('Copy writes the reply to the clipboard and shows it was copied', as
   const copy = button(lastAssistant(), 'Copy');
   copy.click();
   await waitFor(() => copy.hasAttribute('data-nxa-copied'), 'the copied state');
-  assert.equal(text(copy), 'Copied');
   assert.deepEqual(clipboard, ['Echo: second message, edited']);
 });
 
@@ -423,31 +462,30 @@ await check('dropped files become attachments that can be removed and sent', asy
     new window.File(['a,b'], 'table.csv', { type: 'text/csv' }),
     new window.File([new Uint8Array([137, 80, 78, 71])], 'dot.png', { type: 'image/png' }),
   );
-  const rows = () => $$('.composer .attachment');
+  const rows = () => $$('[data-slot="composer-attachments"] nxa-attachment');
   await waitFor(() => rows().length === 3, 'three attachments in the composer');
-  assert.deepEqual(
-    rows().map((row) => text(row.querySelector('.attachment-name'))),
-    ['notes.txt', 'table.csv', 'dot.png'],
-  );
-  assert.equal(text(rows()[0].querySelector('.thumb')), '.txt');
+  assert.deepEqual(rows().map(attachmentName), ['notes.txt', 'table.csv', 'dot.png']);
+  assert.equal(text(rows()[0].querySelector('[nxaAttachmentThumb]')), '.txt');
 
   drop(new window.File(['%PDF'], 'paper.pdf', { type: 'application/pdf' }));
-  const alert = () => $('.composer-error');
+  const alert = () => chat().querySelector('nxa-composer > [role="alert"]');
   await waitFor(alert, 'the rejected file message');
   assert.equal(alert().getAttribute('role'), 'alert');
   assert.match(text(alert()), /^The file was not attached: /);
   assert.equal(rows().length, 3);
 
-  rows()[1].querySelector('[aria-label="Remove attachment"]').click();
+  rows()[1].querySelector('[aria-label="Remove table.csv"]').click();
   await waitFor(() => rows().length === 2, 'the attachment to go');
   await send('read this');
   assert.equal(rows().length, 0);
   assert.equal(alert(), null);
   const user = articles('user').at(-1);
-  assert.deepEqual([...user.querySelectorAll('.attachment-name')].map(text), [
-    'notes.txt',
-    'dot.png',
-  ]);
+  assert.deepEqual(
+    [...user.querySelectorAll('[data-slot="user-message-attachments"] nxa-attachment')].map(
+      attachmentName,
+    ),
+    ['notes.txt', 'dot.png'],
+  );
   assert.equal(lastReply(), 'Echo: read this [attached: notes.txt, dot.png]');
   const sent = lastChatBody().messages.at(-1).content;
   assert.ok(sent.some((part) => part.type === 'file' && part.filename === 'dot.png'));
@@ -466,7 +504,7 @@ await check('a failed request shows its error until it runs again', async () => 
 
 await check('a stream that fails halfway keeps what it wrote and shows its error', async () => {
   await send('/error-stream now');
-  assert.equal(lastText(), 'Echo: /error-stream now');
+  assert.equal(lastReply(), 'Echo: /error-stream now');
   assert.equal(
     text(lastAssistant().querySelector('[role="alert"]')),
     'The stream failed on purpose.',
@@ -477,8 +515,8 @@ await check(
   'New chat opens an empty conversation, and the first one keeps its history',
   async () => {
     const history = messages();
-    sidebar().querySelector('.new-thread').click();
-    await waitFor(() => $('.welcome'), 'the new conversation');
+    newThread().click();
+    await waitFor(() => welcome(), 'the new conversation');
     assert.deepEqual(threadTitles(), ['Hello there!']);
     assert.equal(activeTitle(), '');
     assert.equal(document.activeElement, input());
@@ -488,8 +526,8 @@ await check(
     assert.deepEqual(messages(), history);
     assert.equal(document.activeElement, input());
 
-    sidebar().querySelector('.new-thread').click();
-    await waitFor(() => $('.welcome'), 'the new conversation again');
+    newThread().click();
+    await waitFor(() => welcome(), 'the new conversation again');
   },
 );
 
@@ -498,14 +536,14 @@ await check('a tool the backend runs shows its call, then its result', async () 
   type('weather in Rome');
   await waitFor(() => !sendButton().disabled, 'send to enable');
   sendButton().click();
-  await waitFor(() => $('.tool-card[data-tool="get_weather"]'), 'the weather card');
+  await waitFor(() => $('[data-tool="get_weather"]'), 'the weather card');
   await idle();
-  const card = $('.tool-card[data-tool="get_weather"]');
-  assert.equal(text(card.querySelector('strong')), 'Rome');
-  const forecast = text(card.querySelector('.tool-value'));
+  const card = $('[data-tool="get_weather"]');
+  assert.equal(text(card.querySelector('[data-demo="tool-title"]')), 'Rome');
+  const forecast = text(card.querySelector('[data-demo="tool-value"]'));
   const [, temperature, condition] = /^(\d+)°C, (\w+)$/.exec(forecast) ?? [];
   assert.ok(temperature && condition, forecast);
-  assert.equal(lastText(), `It is ${temperature}°C and ${condition} in Rome.`);
+  assert.equal(lastReply(), `It is ${temperature}°C and ${condition} in Rome.`);
   assert.equal(chatRequests(from).length, 1);
   await waitFor(() => threadTitles()[0] === 'weather in Rome', 'the generated title');
   assert.deepEqual(threadTitles(), ['weather in Rome', 'Hello there!']);
@@ -514,18 +552,19 @@ await check('a tool the backend runs shows its call, then its result', async () 
 await check('a tool that needs approval waits for the user: Deny', async () => {
   const from = requests.length;
   await send('send an email to ada@example.com');
-  const card = () => $$('.tool-card[data-tool="send_email"]').at(-1);
+  const card = () => $$('[data-tool="send_email"]').at(-1);
   assert.equal(card().dataset.answer, 'pending');
+  assert.equal(text(card().querySelector('[data-demo="email-to"]')), 'ada@example.com');
   assert.equal(
-    text(card().querySelector('.tool-value')),
-    'To ada@example.com: “Hello from ngx-assistant”',
+    text(card().querySelector('[data-demo="email-subject"]')),
+    'Hello from ngx-assistant',
   );
-  assert.deepEqual([...card().querySelectorAll('button')].map(text), ['Approve', 'Deny']);
+  assert.deepEqual([...card().querySelectorAll('button')].map(text), ['Deny', 'Approve']);
   assert.equal(isRunning(), false);
   assert.equal(chatRequests(from).length, 1);
 
   button(card(), 'Deny').click();
-  await waitFor(() => lastText() === 'Understood, I did not send the email.', 'the reply to Deny');
+  await waitFor(() => lastReply() === 'Understood, I did not send the email.', 'the reply to Deny');
   await idle();
   assert.equal(card().dataset.answer, 'denied');
   assert.equal(button(card(), 'Approve'), undefined);
@@ -545,47 +584,61 @@ await check('a tool that needs approval waits for the user: Deny', async () => {
 });
 
 await check('a tool that needs approval waits for the user: Approve', async () => {
+  const from = requests.length;
   await send('send an email to bob@example.com');
-  const card = () => $$('.tool-card[data-tool="send_email"]').at(-1);
+  const card = () => $$('[data-tool="send_email"]').at(-1);
+  const outcome = () => card().querySelector('[data-demo="tool-outcome"]');
+  assert.equal(outcome().getAttribute('role'), 'status');
+  assert.equal(text(outcome()), '');
   const approve = button(card(), 'Approve');
+  approve.focus();
   approve.click();
   approve.click();
-  await waitFor(() => lastText() === 'Done: the email to bob@example.com is sent.', 'the reply');
+  await waitFor(() => lastReply() === 'Done: the email to bob@example.com is sent.', 'the reply');
   await idle();
   assert.equal(card().dataset.answer, 'approved');
-  assert.equal(text(card().querySelector('.tool-outcome')), 'Approved');
+  assert.equal(text(outcome()), 'Approved');
+  // One answer reached the backend, and the focus moved from the button to the answer.
+  assert.equal(chatRequests(from).length, 2);
+  assert.equal(document.activeElement, outcome());
 });
 
 await check('a new message instead of an answer leaves the approval unanswered', async () => {
   await send('send an email to eve@example.com');
-  const card = $$('.tool-card[data-tool="send_email"]').at(-1);
+  const card = $$('[data-tool="send_email"]').at(-1);
   assert.equal(card.dataset.answer, 'pending');
   await send('never mind');
   assert.equal(lastReply(), 'Echo: never mind');
   assert.equal(card.dataset.answer, 'unanswered');
-  assert.equal(text(card.querySelector('.tool-outcome')), 'Not answered');
+  assert.equal(text(card.querySelector('[data-demo="tool-outcome"]')), 'Not answered');
   assert.equal(card.querySelector('button'), null);
 });
 
 await check('the model picker sends the model and its effort with every run', async () => {
   await pickModel('Shout');
-  assert.equal(text(modelTrigger()), 'Shout');
+  assert.equal(modelTrigger().getAttribute('aria-label'), 'Model: Shout');
   await send('quiet please');
   assert.equal(lastReply(), 'ECHO: QUIET PLEASE');
   assert.equal(lastChatBody().modelName, 'shout');
   assert.equal(lastChatBody().reasoningEffort, undefined);
 
   await pickModel('Echo', 'High');
-  assert.equal(text(modelTrigger()), 'Echo · high effort');
+  assert.equal(modelTrigger().getAttribute('aria-label'), 'Model: Echo, High effort');
   await send('think first');
   // The reasoning closes once the answer starts, and opens again on demand.
-  const toggle = lastAssistant().querySelector('.reasoning-toggle');
+  const toggle = lastAssistant().querySelector('[data-slot="reasoning-trigger"]');
   assert.equal(text(toggle), 'Reasoning');
   assert.equal(toggle.getAttribute('aria-expanded'), 'false');
   toggle.click();
-  await waitFor(() => lastAssistant().querySelector('.reasoning'), 'the reasoning to open');
-  assert.equal(text(lastAssistant().querySelector('.reasoning')), 'Thinking with high effort.');
-  assert.equal(lastText(), 'Echo: think first');
+  await waitFor(
+    () => lastAssistant().querySelector('[data-slot="reasoning-text"]'),
+    'the reasoning to open',
+  );
+  assert.equal(
+    text(lastAssistant().querySelector('[data-slot="reasoning-text"]')),
+    'Thinking with high effort.',
+  );
+  assert.equal(lastReply(), 'Echo: think first');
   assert.equal(lastChatBody().modelName, 'echo');
   assert.equal(lastChatBody().reasoningEffort, 'high');
   await pickModel('Shout');
@@ -653,9 +706,9 @@ await check('a reload brings back the conversations, their tools and their state
       Array.from({ length: 12 }, (_, i) => `step${i}`).join(' '),
     ],
   );
-  assert.match(text($('.tool-card[data-tool="get_weather"] .tool-value')), /^\d+°C, \w+$/);
+  assert.match(text($('[data-tool="get_weather"] [data-demo="tool-value"]')), /^\d+°C, \w+$/);
   assert.deepEqual(
-    $$('.tool-card[data-tool="send_email"]').map((card) => card.dataset.answer),
+    $$('[data-tool="send_email"]').map((card) => card.dataset.answer),
     ['denied', 'approved', 'unanswered'],
   );
   assert.deepEqual(
@@ -681,7 +734,7 @@ await check('a reload brings back the branches, a stopped reply and the errors',
     text(lastAssistant().querySelector('[role="alert"]')),
     'The stream failed on purpose.',
   );
-  assert.equal(lastText(), 'Echo: /error-stream now');
+  assert.equal(lastReply(), 'Echo: /error-stream now');
 
   users[3].querySelector('[aria-label="Previous branch"]').click();
   await waitFor(() => branch(articles('user')[3]) === '1 / 2', 'the original message');
@@ -690,16 +743,26 @@ await check('a reload brings back the branches, a stopped reply and the errors',
   assert.match(branch(articles('assistant')[3]), /^[12] \/ 2$/);
 });
 
-await check('archiving, restoring and deleting conversations', async () => {
-  const item = () => threadItems().find((i) => text(i).startsWith('Hello there!'));
-  button(item(), 'Archive').click();
-  await waitFor(() => archivedItems().length === 1, 'the archived conversation');
-  assert.deepEqual(threadTitles(), ['weather in Rome']);
+await check('renaming, archiving, restoring and deleting from the row menu', async () => {
+  const item = (title) => threadItems().find((i) => itemTitle(i) === title);
+  await threadAction(item('weather in Rome'), 'Rename');
+  const rename = () => sidebar().querySelector('[data-slot="thread-list-item-rename"]');
+  await waitFor(rename, 'the rename input');
+  type('Forecasts', rename());
+  pressEnter({}, rename());
+  await waitFor(() => item('Forecasts'), 'the renamed conversation');
+  await waitFor(() => stored().threads['thread-2'].title === 'Forecasts', 'the saved title');
+
+  await threadAction(item('Hello there!'), 'Archive');
+  await waitFor(() => threadItems().length === 1, 'the archived conversation to leave the list');
+  assert.deepEqual(threadTitles(), ['Forecasts']);
   // The archived conversation is no longer shown.
   assert.notEqual(activeTitle(), 'Hello there!');
   await waitFor(() => stored().threads['thread-1'].status === 'archived', 'the saved archive');
+  await showArchived();
+  assert.deepEqual(archivedItems().map(itemTitle), ['Hello there!']);
 
-  button(archivedItems()[0], 'Restore').click();
+  await threadAction(archivedItems()[0], 'Restore');
   await waitFor(() => threadItems().length === 2, 'the restored conversation');
   assert.equal(archivedItems().length, 0);
   openThread('Hello there!');
@@ -707,13 +770,80 @@ await check('archiving, restoring and deleting conversations', async () => {
   assert.equal(messageText(articles('user')[0]), 'Hello there!');
   await waitFor(() => stored().threads['thread-1'].status === 'regular', 'the saved restore');
 
-  button(item(), 'Archive').click();
-  await waitFor(() => archivedItems().length === 1, 'the archived conversation');
-  button(archivedItems()[0], 'Delete').click();
+  await threadAction(item('Hello there!'), 'Archive');
+  await showArchived();
+  await threadAction(archivedItems()[0], 'Delete');
   await waitFor(() => archivedItems().length === 0, 'the deleted conversation');
-  assert.deepEqual(threadTitles(), ['weather in Rome']);
+  assert.deepEqual(threadTitles(), ['Forecasts']);
   await waitFor(() => !stored().threads['thread-1'], 'the conversation deleted on the backend');
   assert.equal(stored().messages['thread-1'], undefined);
+});
+
+await check('on a narrow screen the conversations open over the thread, and close', async () => {
+  const toggle = document.querySelector('[data-demo="sidebar-toggle"]');
+  const aside = document.getElementById(toggle.getAttribute('aria-controls'));
+  const open = () => toggle.getAttribute('aria-expanded') === 'true';
+  assert.equal(open(), false);
+  assert.ok(aside.classList.contains('hidden'));
+  toggle.click();
+  await waitFor(open, 'the conversations to open');
+  assert.ok(aside.classList.contains('flex') && !aside.classList.contains('hidden'));
+
+  // Escape closes them, back to the button.
+  newThread().focus();
+  pressEnter({ key: 'Escape' }, newThread());
+  await waitFor(() => !open(), 'the conversations to close');
+  assert.equal(document.activeElement, toggle);
+
+  // Picking a conversation shows it.
+  toggle.click();
+  await waitFor(open, 'the conversations to open again');
+  openThread('Forecasts');
+  await waitFor(() => !open(), 'the conversations to close on a pick');
+  assert.ok(aside.classList.contains('hidden'));
+});
+
+const layoutButton = (name) =>
+  button(document.querySelector('[role="group"][aria-label="Layout"]'), name);
+
+await check('the widget layout shows the conversations in the assistant modal', async () => {
+  openThread('Forecasts');
+  await waitFor(() => activeTitle() === 'Forecasts', 'the conversation');
+  layoutButton('widget').click();
+  await waitFor(() => !sidebar(), 'the page layout to go');
+  const launcher = () => document.querySelector('[data-slot="assistant-modal-button"]');
+  await waitFor(launcher, 'the launcher');
+  assert.equal(chat(), null);
+
+  launcher().click();
+  await waitFor(chat, 'the thread in the modal');
+  assert.equal(launcher().getAttribute('aria-expanded'), 'true');
+  assert.equal(text(document.querySelector('[data-slot="assistant-modal-title"]')), 'Forecasts');
+  await send('from the widget');
+  assert.equal(lastReply(), 'Echo: from the widget');
+
+  // Escape from inside closes it, and the focus goes back to the launcher.
+  input().focus();
+  pressEnter({ key: 'Escape' });
+  await waitFor(() => !chat(), 'the modal to close');
+  assert.equal(launcher().getAttribute('aria-expanded'), 'false');
+  assert.equal(document.activeElement, launcher());
+
+  layoutButton('page').click();
+  await waitFor(() => sidebar() && chat(), 'the page layout');
+  assert.equal(lastReply(), 'Echo: from the widget');
+});
+
+await check('the theme toggle switches the page to dark and back', async () => {
+  const toggle = document.querySelector('[data-demo="theme-toggle"]');
+  const root = document.documentElement;
+  const dark = toggle.getAttribute('aria-pressed') === 'true';
+  toggle.click();
+  await waitFor(() => root.classList.contains('dark') === !dark, 'the theme to change');
+  assert.equal(root.classList.contains('light'), dark);
+  assert.equal(toggle.getAttribute('aria-pressed'), String(!dark));
+  toggle.click();
+  await waitFor(() => root.classList.contains('dark') === dark, 'the theme back');
   assert.deepEqual(errors, []);
 });
 
