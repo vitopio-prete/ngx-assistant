@@ -37,6 +37,27 @@ Every file depends only on `@ngx-assistant/angular` (and its engine, for a few t
 
 ## Use them
 
+`ng add @ngx-assistant/angular` sets up Tailwind CSS v4 and copies the thread into
+`src/app/chat`. Each component group also has its own generator, which copies its files and the
+ones it uses (the icons, the theme, the menu), adds the packages they import and imports the theme
+in the global stylesheet:
+
+| Generator                                     | Copies                                                  |
+| --------------------------------------------- | ------------------------------------------------------- |
+| `ng g @ngx-assistant/angular:thread`          | `thread/`, `menu/`                                      |
+| `ng g @ngx-assistant/angular:thread-list`     | `thread-list/`, `menu/`                                 |
+| `ng g @ngx-assistant/angular:assistant-modal` | `assistant-modal/`, with the thread and the thread list |
+| `ng g @ngx-assistant/angular:model-selector`  | `model-selector/`                                       |
+| `ng g @ngx-assistant/angular:approval-card`   | `tool-ui/approval-card.ts`                              |
+
+They take `--path` (the folder, relative to the source root, `app/chat` by default) and
+`--project`. A file you changed is kept when a generator runs again and the generator lists it;
+`--overwrite` replaces it with the version of the installed package. The generators copy this
+folder's `src/lib` without its tests, as it is: a test of the schematics checks that every file
+here belongs to a generator.
+
+Without the schematics:
+
 1. Install Tailwind v4 for Angular (`tailwindcss`, `@tailwindcss/postcss` and a `.postcssrc.json`
    with the plugin), `@angular/cdk` and `markdown-it`.
 2. Copy `src/lib` into your app, for instance as `src/app/chat`.
