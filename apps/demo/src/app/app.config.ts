@@ -8,11 +8,12 @@ import {
 } from '@ngx-assistant/angular';
 import { demoAttachments } from './attachments';
 import { threadHistory, threadListAdapter } from './backend-client';
-import { EmailApproval, ToolFallback, WeatherCard } from './tool-cards';
+import { EmailApproval, WeatherCard } from './tool-cards';
 
 /**
  * The conversations live on the backend (`/api/threads`): each one runs on its own runtime, which
- * loads and saves its messages there and posts every run to `/api/chat`.
+ * loads and saves its messages there and posts every run to `/api/chat`. Tool calls without a UI of
+ * their own show in the tool fallback of the copied components.
  */
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -31,6 +32,5 @@ export const appConfig: ApplicationConfig = {
     }),
     provideToolUi({ toolName: 'get_weather', component: WeatherCard }),
     provideToolUi({ toolName: 'send_email', component: EmailApproval }),
-    provideToolUi({ fallback: ToolFallback }),
   ],
 };
