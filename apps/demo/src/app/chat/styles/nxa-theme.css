@@ -1,0 +1,183 @@
+/*
+ * The theme of the ngx-assistant components. Import it after Tailwind:
+ *
+ *   @import 'tailwindcss';
+ *   @import './nxa-theme.css';
+ *
+ * Every token falls back to the variable of the same name of a shadcn or spartan theme
+ * (--background, --primary...), so the components follow such a theme when the app has one.
+ * Change a token here, or set it on any element, to restyle the components below it.
+ *
+ * The menus and the assistant modal open in the overlay of @angular/cdk, whose layout comes
+ * from the stylesheet imported below.
+ */
+
+@import '@angular/cdk/overlay-prebuilt.css';
+
+:root {
+  --nxa-background: var(--background, oklch(1 0 0));
+  --nxa-foreground: var(--foreground, oklch(0.145 0 0));
+  --nxa-muted: var(--muted, oklch(0.97 0 0));
+  --nxa-muted-foreground: var(--muted-foreground, oklch(0.48 0 0));
+  --nxa-primary: var(--primary, oklch(0.205 0 0));
+  --nxa-primary-foreground: var(--primary-foreground, oklch(0.985 0 0));
+  --nxa-accent: var(--accent, oklch(0.95 0 0));
+  --nxa-accent-foreground: var(--accent-foreground, oklch(0.205 0 0));
+  --nxa-border: var(--border, oklch(0.9 0 0));
+  --nxa-ring: var(--ring, oklch(0.65 0 0));
+  --nxa-destructive: var(--destructive, oklch(0.55 0.22 27));
+  --nxa-radius: var(--radius, 0.625rem);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light):not([data-theme='light']) {
+    --nxa-background: var(--background, oklch(0.16 0 0));
+    --nxa-foreground: var(--foreground, oklch(0.985 0 0));
+    --nxa-muted: var(--muted, oklch(0.25 0 0));
+    --nxa-muted-foreground: var(--muted-foreground, oklch(0.72 0 0));
+    --nxa-primary: var(--primary, oklch(0.92 0 0));
+    --nxa-primary-foreground: var(--primary-foreground, oklch(0.205 0 0));
+    --nxa-accent: var(--accent, oklch(0.28 0 0));
+    --nxa-accent-foreground: var(--accent-foreground, oklch(0.985 0 0));
+    --nxa-border: var(--border, oklch(1 0 0 / 14%));
+    --nxa-ring: var(--ring, oklch(0.56 0 0));
+    --nxa-destructive: var(--destructive, oklch(0.7 0.19 22));
+  }
+}
+
+.dark,
+[data-theme='dark'] {
+  --nxa-background: var(--background, oklch(0.16 0 0));
+  --nxa-foreground: var(--foreground, oklch(0.985 0 0));
+  --nxa-muted: var(--muted, oklch(0.25 0 0));
+  --nxa-muted-foreground: var(--muted-foreground, oklch(0.72 0 0));
+  --nxa-primary: var(--primary, oklch(0.92 0 0));
+  --nxa-primary-foreground: var(--primary-foreground, oklch(0.205 0 0));
+  --nxa-accent: var(--accent, oklch(0.28 0 0));
+  --nxa-accent-foreground: var(--accent-foreground, oklch(0.985 0 0));
+  --nxa-border: var(--border, oklch(1 0 0 / 14%));
+  --nxa-ring: var(--ring, oklch(0.56 0 0));
+  --nxa-destructive: var(--destructive, oklch(0.7 0.19 22));
+}
+
+@theme inline {
+  --color-nxa-background: var(--nxa-background);
+  --color-nxa-foreground: var(--nxa-foreground);
+  --color-nxa-muted: var(--nxa-muted);
+  --color-nxa-muted-foreground: var(--nxa-muted-foreground);
+  --color-nxa-primary: var(--nxa-primary);
+  --color-nxa-primary-foreground: var(--nxa-primary-foreground);
+  --color-nxa-accent: var(--nxa-accent);
+  --color-nxa-accent-foreground: var(--nxa-accent-foreground);
+  --color-nxa-border: var(--nxa-border);
+  --color-nxa-ring: var(--nxa-ring);
+  --color-nxa-destructive: var(--nxa-destructive);
+  --radius-nxa: var(--nxa-radius);
+}
+
+/* Typography of the markdown rendered by nxa-markdown-text. */
+@layer components {
+  .nxa-md {
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+  }
+  .nxa-md > :first-child {
+    margin-top: 0;
+  }
+  .nxa-md > :last-child {
+    margin-bottom: 0;
+  }
+  .nxa-md p,
+  .nxa-md ul,
+  .nxa-md ol,
+  .nxa-md pre,
+  .nxa-md blockquote,
+  .nxa-md table {
+    margin: 0.75rem 0;
+  }
+  .nxa-md h1,
+  .nxa-md h2,
+  .nxa-md h3,
+  .nxa-md h4 {
+    margin: 1.25rem 0 0.5rem;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .nxa-md h1 {
+    font-size: 1.5rem;
+  }
+  .nxa-md h2 {
+    font-size: 1.25rem;
+  }
+  .nxa-md h3 {
+    font-size: 1.125rem;
+  }
+  .nxa-md ul,
+  .nxa-md ol {
+    padding-inline-start: 1.5rem;
+  }
+  .nxa-md ul {
+    list-style: disc;
+  }
+  .nxa-md ol {
+    list-style: decimal;
+  }
+  .nxa-md li {
+    margin: 0.25rem 0;
+  }
+  .nxa-md li > p {
+    margin: 0;
+  }
+  .nxa-md a {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .nxa-md strong {
+    font-weight: 600;
+  }
+  .nxa-md code {
+    border-radius: 0.25rem;
+    background: var(--nxa-muted);
+    padding: 0.125rem 0.375rem;
+    font-size: 0.875em;
+  }
+  .nxa-md pre {
+    overflow-x: auto;
+    border: 1px solid var(--nxa-border);
+    border-radius: 0.75rem;
+    background: var(--nxa-muted);
+    padding: 0.75rem 1rem;
+    font-size: 0.875rem;
+    line-height: 1.6;
+  }
+  .nxa-md pre code {
+    background: transparent;
+    padding: 0;
+    font-size: inherit;
+  }
+  .nxa-md blockquote {
+    border-inline-start: 2px solid var(--nxa-border);
+    padding-inline-start: 0.75rem;
+    color: var(--nxa-muted-foreground);
+  }
+  .nxa-md hr {
+    margin: 1rem 0;
+    border-color: var(--nxa-border);
+  }
+  .nxa-md table {
+    display: block;
+    overflow-x: auto;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+  .nxa-md th,
+  .nxa-md td {
+    border: 1px solid var(--nxa-border);
+    padding: 0.375rem 0.75rem;
+    text-align: start;
+  }
+  .nxa-md th {
+    background: var(--nxa-muted);
+    font-weight: 600;
+  }
+}

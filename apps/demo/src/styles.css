@@ -1,3 +1,5 @@
+@import 'tailwindcss';
+@import './app/chat/styles/nxa-theme.css';
 /* Styles of the demo app. The primitives bring no styles: state comes from their attributes. */
 :root {
   color-scheme: light dark;
