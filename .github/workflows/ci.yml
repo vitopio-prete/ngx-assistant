@@ -79,6 +79,9 @@ jobs:
       - name: Demo end-to-end (send, streaming, stop)
         run: pnpm run e2e
 
+      - name: ng add and the component generators in a new Angular app
+        run: scripts/try-ng-add.sh "$RUNNER_TEMP/ng-add"
+
       - name: Package copies of LICENSE and NOTICE match the root
         run: |
           for p in engine angular; do
