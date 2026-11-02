@@ -19,6 +19,48 @@ export class Chat {
 }
 ```
 
+## Installation
+
+```bash
+ng add @ngx-assistant/angular
+```
+
+`ng add` sets the library up in an application of the workspace (`--project` picks one):
+
+- adds `@ngx-assistant/engine`;
+- provides a runtime in `app.config.ts` (or in `main.ts` when the app has no config). It asks
+  which: `data-stream` provides `provideDataStreamRuntime({ api })`, with `--api` (default
+  `/api/chat`); `local` creates `chat-model.ts`, a chat model that answers with a fixed text, to
+  replace with a call to your model, and provides `provideLocalRuntime(() => inject(ChatModel))`.
+  An app that already provides a runtime keeps it;
+- defines `process.env.NODE_ENV` in the `production` and `development` configurations of the
+  build, which turns the development checks of the engine on in development builds;
+- raises the `initial` budgets of the build to 1 MB (warning) and 2 MB (error) when they are
+  lower: the engine, markdown and the styled components take about 800 kB;
+- sets up Tailwind CSS v4 (`tailwindcss`, `@tailwindcss/postcss`, `.postcssrc.json` and
+  `@import 'tailwindcss'` in the global stylesheet; a separate `tailwind.css` when the global
+  styles are Sass or Less). It leaves Tailwind CSS v3 alone and says so; `--skip-tailwind` leaves
+  Tailwind to you;
+- asks whether to copy the styled chat components into the app (`--components`, by default into
+  `src/app/chat`, `--path` changes it).
+
+Then render the chat in a component:
+
+```ts
+import { NxaThread } from './chat';
+
+@Component({
+  selector: 'app-root',
+  imports: [NxaThread],
+  template: `<nxa-thread class="h-dvh" />`,
+})
+export class App {}
+```
+
+The other styled components are copied by their generators: `ng g @ngx-assistant/angular:thread`,
+`thread-list`, `assistant-modal`, `model-selector` and `approval-card`. Running `ng add` or a
+generator again changes nothing that is already set up, and keeps the files you changed.
+
 ## Runtimes
 
 `provideLocalRuntime(chatModel, options?)` creates a runtime that runs the chat in the browser and
@@ -1058,4 +1100,12 @@ state.
 ```bash
 pnpm ng build @ngx-assistant/angular   # output in dist/angular
 pnpm ng test @ngx-assistant/angular
+pnpm run build:schematics              # the schematics, in dist/angular/schematics
+pnpm run test:schematics               # their tests, on a workspace in memory
+scripts/try-ng-add.sh                  # ng add in a new app with the packed libraries, then ng build
 ```
+
+The schematics live in `schematics/` and are compiled on their own (CommonJS, as the Angular CLI
+loads them). Their build bundles the styled components of `packages/ui/src/lib`;
+`schematics/ui/components.json` says which entry files each generator starts from, and the build
+adds every file they import.

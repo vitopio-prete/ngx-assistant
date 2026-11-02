@@ -1,0 +1,35 @@
+{
+  "$schema": "../../../node_modules/@angular-devkit/schematics/collection-schema.json",
+  "schematics": {
+    "ng-add": {
+      "description": "Sets up ngx-assistant: the engine, a runtime, Tailwind CSS and the chat components.",
+      "factory": "./ng-add/index",
+      "schema": "./ng-add/schema.json"
+    },
+    "thread": {
+      "description": "Copies the chat thread components into the app.",
+      "factory": "./ui/index#thread",
+      "schema": "./ui/schema.json"
+    },
+    "thread-list": {
+      "description": "Copies the thread list sidebar into the app.",
+      "factory": "./ui/index#threadList",
+      "schema": "./ui/schema.json"
+    },
+    "assistant-modal": {
+      "description": "Copies the floating assistant modal, with the thread and the thread list, into the app.",
+      "factory": "./ui/index#assistantModal",
+      "schema": "./ui/schema.json"
+    },
+    "model-selector": {
+      "description": "Copies the model selector menu into the app.",
+      "factory": "./ui/index#modelSelector",
+      "schema": "./ui/schema.json"
+    },
+    "approval-card": {
+      "description": "Copies the tool approval card into the app.",
+      "factory": "./ui/index#approvalCard",
+      "schema": "./ui/schema.json"
+    }
+  }
+}

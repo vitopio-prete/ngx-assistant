@@ -18,7 +18,7 @@ Requires Node `^22.22.3 || ^24.15.0` and pnpm (version pinned in `package.json`)
 pnpm install
 pnpm build       # engine (tsc) + Angular library (ng-packagr)
 pnpm test        # engine tests (Vitest) + Angular library tests
-pnpm typecheck   # engine sources and tests
+pnpm typecheck   # engine sources and tests, schematics
 ```
 
 ## License
