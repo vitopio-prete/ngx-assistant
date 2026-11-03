@@ -4,12 +4,20 @@ import { injectAssistant, provideLocalRuntime, type ModelOption } from '@ngx-ass
 import type { ChatModelAdapter, ModelContext } from '@ngx-assistant/engine';
 import { axeViolations } from '../../testing/a11y';
 import { keydown, slots, texts, typeInto, until } from '../../testing/thread-list-harness';
-import { NxaModelSelector } from './model-selector';
+import { NxaModelSelector, NxaModelSelectorIcon } from './model-selector';
+
+const ICON = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22/%3E';
 
 const MODELS: ModelOption[] = [
   { id: 'small', name: 'Small', description: 'Fast and cheap' },
   { id: 'medium', name: 'Medium', disabled: true },
   { id: 'large', name: 'Large', efforts: true },
+];
+
+const WITH_ICONS: ModelOption[] = [
+  { id: 'small', name: 'Small', icon: ICON },
+  { id: 'pro', name: 'Pro', icon: ICON, disabled: true, description: 'Sign in to use' },
+  { id: 'plain', name: 'Plain' },
 ];
 
 const MANY: ModelOption[] = ['One', 'Two', 'Three', 'Four', 'Five', 'Six'].map((name) => ({
@@ -30,11 +38,18 @@ const model: ChatModelAdapter = {
   imports: [NxaModelSelector],
   providers: [provideLocalRuntime(model)],
   template: `
-    <nxa-model-selector [models]="models()" [(value)]="value" [(effort)]="effort" [side]="side()" />
+    <nxa-model-selector
+      [models]="models()"
+      [(value)]="value"
+      [(effort)]="effort"
+      [side]="side()"
+      [variant]="variant()"
+    />
     <button class="outside">Outside</button>
   `,
 })
 class Host {
+  readonly variant = signal<'default' | 'ghost'>('default');
   readonly models = signal(MODELS);
   readonly value = signal<string | undefined>(undefined);
   readonly effort = signal<string | undefined>(undefined);
@@ -75,9 +90,7 @@ describe('nxa-model-selector', () => {
     expect(content().hidden).toBe(true);
 
     await open();
-    expect(
-      slots(el(), 'model-selector-item').map((node) => node.querySelector('span')?.textContent),
-    ).toEqual(['Small', 'Medium', 'Large']);
+    expect(texts(el(), 'model-selector-item-name')).toEqual(['Small', 'Medium', 'Large']);
     expect(item('Small').textContent).toContain('Fast and cheap');
     expect(trigger().getAttribute('aria-label')).toBe('Model: Small');
     expect(item('Medium').getAttribute('aria-disabled')).toBe('true');
@@ -145,5 +158,99 @@ describe('nxa-model-selector', () => {
     expect(await axeViolations(el())).toEqual([]);
     await open();
     expect(await axeViolations(el())).toEqual([]);
+  });
+
+  it('shows the image of a model beside its name, in the button and in the list', async () => {
+    await mount((host) => host.models.set(WITH_ICONS));
+    const icon = (node: Element) =>
+      node.querySelector<HTMLImageElement>('[data-slot="model-selector-icon"] img');
+    expect(icon(trigger())?.getAttribute('src')).toBe(ICON);
+    expect(icon(trigger())?.alt).toBe('');
+    expect(trigger().getAttribute('aria-label')).toBe('Model: Small');
+
+    await open();
+    expect(icon(item('Small'))?.getAttribute('src')).toBe(ICON);
+    expect(icon(item('Pro'))).not.toBeNull();
+    expect(item('Plain').querySelector('[data-slot="model-selector-icon"]')).toBeNull();
+
+    item('Plain').click();
+    await until(fixture, () => expect(trigger().textContent).toContain('Plain'));
+    expect(trigger().querySelector('[data-slot="model-selector-icon"]')).toBeNull();
+  });
+
+  it('keeps a disabled model in the list with its reason, and never picks it', async () => {
+    await mount((host) => host.models.set(WITH_ICONS));
+    await open();
+    expect(item('Pro').textContent).toContain('Sign in to use');
+    expect(item('Pro').getAttribute('aria-disabled')).toBe('true');
+    expect(item('Pro').hasAttribute('data-disabled')).toBe(true);
+
+    item('Pro').click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(fixture.componentInstance.value()).toBeUndefined();
+    expect(content().hidden).toBe(false);
+
+    trigger().focus();
+    keydown(trigger(), 'ArrowDown');
+    await until(fixture, () => expect(item('Plain').hasAttribute('data-highlighted')).toBe(true));
+    keydown(trigger(), 'Enter');
+    await until(fixture, () => expect(fixture.componentInstance.value()).toBe('plain'));
+  });
+
+  it('is a compact button without a background in the ghost variant', async () => {
+    await mount((host) => host.variant.set('ghost'));
+    expect(trigger().dataset['variant']).toBe('ghost');
+    expect(trigger().classList).toContain('h-7');
+    expect(trigger().classList).not.toContain('hover:bg-nxa-accent');
+
+    fixture.componentInstance.variant.set('default');
+    await until(fixture, () => expect(trigger().classList).toContain('h-8'));
+    expect(trigger().classList).toContain('hover:bg-nxa-accent');
+  });
+
+  it('has no axe violations with icons and a disabled model', async () => {
+    await mount((host) => host.models.set(WITH_ICONS));
+    await open();
+    expect(await axeViolations(el())).toEqual([]);
+  });
+});
+
+@Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [NxaModelSelector, NxaModelSelectorIcon],
+  template: `
+    <nxa-model-selector [models]="models">
+      <ng-template nxaModelSelectorIcon let-model>
+        @if (model.id !== 'plain') {
+          <svg class="custom-icon" [attr.data-model]="model.id"></svg>
+        }
+      </ng-template>
+    </nxa-model-selector>
+  `,
+})
+class CustomIconHost {
+  readonly models = WITH_ICONS;
+}
+
+describe('nxa-model-selector with a nxaModelSelectorIcon template', () => {
+  it('draws the icons with the template instead of the images', async () => {
+    const custom = TestBed.createComponent(CustomIconHost);
+    document.body.appendChild(custom.nativeElement);
+    custom.detectChanges();
+    await custom.whenStable();
+    const root = custom.nativeElement as HTMLElement;
+
+    const button = slots(root, 'model-selector-trigger')[0]!;
+    expect(button.querySelector('svg.custom-icon')?.getAttribute('data-model')).toBe('small');
+    expect(root.querySelector('[data-slot="model-selector-icon"] img')).toBeNull();
+
+    button.click();
+    await until(custom, () => expect(slots(root, 'model-selector-content')[0]!.hidden).toBe(false));
+    expect(
+      [...root.querySelectorAll('[data-slot="model-selector-item"] svg.custom-icon')].map((node) =>
+        node.getAttribute('data-model'),
+      ),
+    ).toEqual(['small', 'pro']);
   });
 });
