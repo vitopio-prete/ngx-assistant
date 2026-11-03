@@ -47,11 +47,15 @@ const ICON_SWAP =
  * The window is not modal, as a chat widget beside the page: a click outside leaves it open; the
  * button and Escape close it, and the focus goes back to the button. Its top corner on the start
  * side resizes it, with the pointer or the arrow keys; Enter or a double click restore the default
- * size. The size is remembered in `localStorage`.
+ * size. The size is remembered in `localStorage`. Elements marked `nxaComposerTools` go in the
+ * composer of its thread.
  *
  * @example
  * ```html
  * <nxa-assistant-modal />
+ * <nxa-assistant-modal>
+ *   <nxa-model-selector nxaComposerTools variant="ghost" side="top" [models]="models" />
+ * </nxa-assistant-modal>
  * ```
  */
 @Component({
@@ -166,11 +170,9 @@ const ICON_SWAP =
           </div>
         </div>
         <div data-slot="assistant-modal-body" class="relative min-h-0 flex-1">
-          <nxa-thread
-            data-slot="assistant-modal-thread"
-            class="h-full"
-            [inert]="view() === 'list'"
-          />
+          <nxa-thread data-slot="assistant-modal-thread" class="h-full" [inert]="view() === 'list'">
+            <ng-content select="[nxaComposerTools]" ngProjectAs="[nxaComposerTools]" />
+          </nxa-thread>
           @if (view() === 'list') {
             <nav
               #list

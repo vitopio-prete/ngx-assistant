@@ -16,7 +16,15 @@ export interface ModelOption {
   readonly id: string;
   readonly name: string;
   readonly description?: string | undefined;
-  /** A disabled model is listed but cannot be picked. */
+  /**
+   * The URL of an image for the model (a file or a `data:` URL). The picker only carries it: the
+   * part that shows the model decides how to draw it.
+   */
+  readonly icon?: string | undefined;
+  /**
+   * A disabled model is listed but cannot be picked. Say why in `description`, e.g. "Sign in to
+   * use".
+   */
   readonly disabled?: boolean | undefined;
   /** Extra terms the search matches, in addition to the id and the name. */
   readonly keywords?: readonly string[] | undefined;

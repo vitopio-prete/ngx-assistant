@@ -22,11 +22,15 @@ import { NxaUserMessage } from './user-message';
  * while it is empty, the messages (each user message turns into its edit form while edited), a
  * viewport that follows the reply as it streams, a button back to the bottom, and the composer.
  *
- * Fill a container with a height: the thread takes all of it and scrolls inside.
+ * Fill a container with a height: the thread takes all of it and scrolls inside. Elements marked
+ * `nxaComposerTools` go in the composer, after the attachment button.
  *
  * @example
  * ```html
  * <nxa-thread class="h-dvh" />
+ * <nxa-thread class="h-dvh">
+ *   <nxa-model-selector nxaComposerTools variant="ghost" side="top" [models]="models" />
+ * </nxa-thread>
  * ```
  */
 @Component({
@@ -95,7 +99,9 @@ import { NxaUserMessage } from './user-message';
             >
               <nxa-icon name="arrow-down" class="size-4" />
             </button>
-            <nxa-composer class="w-full" [autoFocus]="autoFocus()" />
+            <nxa-composer class="w-full" [autoFocus]="autoFocus()">
+              <ng-content select="[nxaComposerTools]" ngProjectAs="[nxaComposerTools]" />
+            </nxa-composer>
           </div>
         </div>
       </div>

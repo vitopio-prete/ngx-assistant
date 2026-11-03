@@ -18,8 +18,9 @@ that talks to a streaming backend over HTTP.
   the backend, which streams the call and its result. `send_email` has no `execute` on the backend:
   the run stops until the user approves or denies it in the browser, and the answer goes back to
   the backend as the tool result. Any other tool shows in the tool fallback.
-- **Model selector:** the model and its reasoning effort, picked in the header, go in the model
-  context of the thread list, so every run of every conversation asks for them.
+- **Model selector:** the model and its reasoning effort, picked in the composer, go in the model
+  context of the thread list, so every run of every conversation asks for them. Each model has an
+  icon, and a third model is listed but disabled, with the reason under its name.
 - **Composer:** Enter to send, Shift+Enter for a new line, Stop during a run, which aborts the
   request; attach images or text files with the button, by pasting or by dropping them.
 - **Layouts and theme:** the header switches between the full page and a widget, where the same
