@@ -228,7 +228,7 @@ async function send(value) {
   await run(() => sendButton().click());
 }
 
-/** Picks a model in the header, then its effort level when given. */
+/** Picks a model in the composer, then its effort level when given. */
 async function pickModel(name, effort) {
   const content = picker().querySelector('[data-slot="model-selector-content"]');
   const open = async () => {
@@ -237,7 +237,7 @@ async function pickModel(name, effort) {
   };
   await open();
   [...content.querySelectorAll('[data-slot="model-selector-item"]')]
-    .find((item) => text(item.querySelector('span')) === name)
+    .find((item) => text(item.querySelector('[data-slot="model-selector-item-name"]')) === name)
     .click();
   await waitFor(() => content.hidden, 'the model list to close');
   if (!effort) return;
@@ -614,6 +614,31 @@ await check('a new message instead of an answer leaves the approval unanswered',
   assert.equal(card.querySelector('button'), null);
 });
 
+await check('the model picker sits in the composer, with an icon per model', async () => {
+  assert.ok(picker().closest('[data-slot="composer-tools"]'), 'the picker is in the composer');
+  assert.equal(modelTrigger().dataset.variant, 'ghost');
+  assert.ok(modelTrigger().querySelector('[data-slot="model-selector-icon"] img'));
+
+  const content = picker().querySelector('[data-slot="model-selector-content"]');
+  modelTrigger().click();
+  await waitFor(() => !content.hidden, 'the model list');
+  const items = [...content.querySelectorAll('[data-slot="model-selector-item"]')];
+  assert.deepEqual(
+    items.map((item) => text(item.querySelector('[data-slot="model-selector-item-name"]'))),
+    ['Echo', 'Shout', 'Pro'],
+  );
+  assert.ok(items.every((item) => item.querySelector('[data-slot="model-selector-icon"] img')));
+  const pro = items[2];
+  assert.equal(pro.getAttribute('aria-disabled'), 'true');
+  assert.ok(text(pro).includes('Sign in to use'));
+  pro.click();
+  await sleep(50);
+  assert.equal(content.hidden, false, 'a disabled model keeps the list open');
+  assert.equal(modelTrigger().getAttribute('aria-label'), 'Model: Echo');
+  modelTrigger().click();
+  await waitFor(() => content.hidden, 'the model list to close');
+});
+
 await check('the model picker sends the model and its effort with every run', async () => {
   await pickModel('Shout');
   assert.equal(modelTrigger().getAttribute('aria-label'), 'Model: Shout');
@@ -819,6 +844,12 @@ await check('the widget layout shows the conversations in the assistant modal', 
   await waitFor(chat, 'the thread in the modal');
   assert.equal(launcher().getAttribute('aria-expanded'), 'true');
   assert.equal(text(document.querySelector('[data-slot="assistant-modal-title"]')), 'Forecasts');
+  assert.ok(
+    document.querySelector(
+      '[data-slot="assistant-modal-content"] [data-slot="composer-tools"] nxa-model-selector',
+    ),
+    'the model picker is in the composer of the modal',
+  );
   await send('from the widget');
   assert.equal(lastReply(), 'Echo: from the widget');
 
