@@ -119,7 +119,20 @@ Put the list beside the thread, or the modal anywhere in the page:
 ```
 
 `<nxa-model-selector [models]="models" [(value)]="model" />` puts the chosen model (and effort) in
-the model context of the runtime, so every run asks for it. `side="top"` opens its panel above it.
+the model context of the runtime, so every run asks for it. `side="top"` opens its panel above it,
+and `variant="ghost"` makes it a compact button without a background. A model with `icon` (an
+image URL) shows it beside its name; `<ng-template nxaModelSelectorIcon let-model>` inside the
+selector draws the icons instead, for inline SVG. A model with `disabled: true` stays in the list,
+dimmed, with its `description` as the reason (for example "Sign in to use").
+
+`nxa-composer`, `nxa-thread` and `nxa-assistant-modal` put the elements marked `nxaComposerTools`
+in the composer, after the attachment button:
+
+```html
+<nxa-thread>
+  <nxa-model-selector nxaComposerTools variant="ghost" side="top" [models]="models" />
+</nxa-thread>
+```
 
 The menus and the modal open in the overlay of `@angular/cdk`, at the end of the body: the theme
 imports its stylesheet. They follow the tokens set on the root, not those set on an element, and

@@ -23,6 +23,16 @@ const ROUND =
  * Shift+Enter adds a line) and Send, which turns into Stop while a run goes on. With `autoFocus`
  * the field takes the focus when it appears, when a run starts, when the thread changes and after
  * scrolling to the bottom.
+ *
+ * Elements marked `nxaComposerTools` go in the row under the field, after the attachment button:
+ * a model selector, or any other control.
+ *
+ * @example
+ * ```html
+ * <nxa-composer>
+ *   <nxa-model-selector nxaComposerTools variant="ghost" side="top" [models]="models" />
+ * </nxa-composer>
+ * ```
  */
 @Component({
   selector: 'nxa-composer',
@@ -62,7 +72,7 @@ const ROUND =
         class="max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1.5 text-base leading-6 outline-none [field-sizing:content] placeholder:text-nxa-muted-foreground"
       ></textarea>
       <div class="flex items-center justify-between">
-        <div class="flex items-center">
+        <div data-slot="composer-tools" class="flex min-w-0 items-center gap-1">
           @if (canAttach()) {
             <button
               nxaComposerAddAttachment
@@ -75,6 +85,7 @@ const ROUND =
               <nxa-icon name="paperclip" class="size-4" />
             </button>
           }
+          <ng-content select="[nxaComposerTools]" />
         </div>
         <button
           *nxaThreadIf="{ running: false }"
