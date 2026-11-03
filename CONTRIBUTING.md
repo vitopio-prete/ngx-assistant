@@ -11,15 +11,16 @@ pnpm install     # installs dependencies and the git hooks (lefthook)
 pnpm run dev     # runs the demo app
 ```
 
-| Command                                     | Purpose                                                         |
-| ------------------------------------------- | --------------------------------------------------------------- |
-| `pnpm run build`                            | Build all packages                                              |
-| `pnpm run test`                             | Unit tests                                                      |
-| `pnpm run e2e`                              | End-to-end check of the demo build (run `pnpm run build` first) |
-| `pnpm run lint`                             | Lint                                                            |
-| `pnpm run typecheck`                        | Type-check the engine sources and tests                         |
-| `pnpm run format` / `pnpm run format:check` | Prettier                                                        |
-| `pnpm run security:check`                   | Audit production dependencies                                   |
+| Command                                            | Purpose                                                         |
+| -------------------------------------------------- | --------------------------------------------------------------- |
+| `pnpm run build`                                   | Build all packages                                              |
+| `pnpm run test`                                    | Unit tests                                                      |
+| `pnpm run e2e`                                     | End-to-end check of the demo build (run `pnpm run build` first) |
+| `pnpm run check:demo-ui` / `pnpm run sync:demo-ui` | Check / refresh the demo's copies of the styled components      |
+| `pnpm run lint`                                    | Lint                                                            |
+| `pnpm run typecheck`                               | Type-check the engine sources and tests                         |
+| `pnpm run format` / `pnpm run format:check`        | Prettier                                                        |
+| `pnpm run security:check`                          | Audit production dependencies                                   |
 
 ## Making a change
 

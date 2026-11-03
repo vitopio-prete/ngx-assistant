@@ -7,10 +7,14 @@
     "e2e": "node e2e/chat.e2e.mjs"
   },
   "dependencies": {
+    "@angular/cdk": "^22.2.5",
     "@ngx-assistant/angular": "workspace:*",
-    "@ngx-assistant/engine": "workspace:*"
+    "@ngx-assistant/engine": "workspace:*",
+    "markdown-it": "^15.0.3"
   },
   "devDependencies": {
-    "jsdom": "^30.0.0"
+    "@tailwindcss/postcss": "^4.3.3",
+    "jsdom": "^30.0.0",
+    "tailwindcss": "^4.3.3"
   }
 }
