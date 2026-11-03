@@ -1076,7 +1076,8 @@ readonly models: ModelOption[] = [
 | `[nxaModelPickerEffort]`           | `role="radiogroup"` of the effort levels, `hidden` when the chosen model has none.              |
 | `button[nxaModelPickerEffortItem]` | `role="radio"` for a level: a click chooses it; the arrows move between levels.                 |
 
-Without `value`, the first model is chosen. `efforts: true` gives the low, medium and high levels;
+Without `value`, the first model that is not disabled is chosen. A model can carry an `icon` (an
+image URL) for the parts that show it; the picker only passes it along. `efforts: true` gives the low, medium and high levels;
 the chosen effort stays across model switches and `activeEffort()` is the one that applies to the
 chosen model. Through `#picker="nxaModelPicker"` (or `injectModelPicker()` in a custom part):
 `selectedModel()`, `efforts()`, `activeEffort()`, `filteredModels()`, `highlightedId()`, `query`,

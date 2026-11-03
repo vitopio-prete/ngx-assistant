@@ -68,12 +68,15 @@ export class NxaModelPickerTrigger {
     '[attr.hidden]': "picker.open() ? null : ''",
     '[attr.data-state]': "picker.open() ? 'open' : 'closed'",
     '(pointerdown)': 'onPointerDown($event)',
+    // After a tap, touch browsers still send a mousedown: a form around the picker (a composer)
+    // must not take it as a press on its empty space.
+    '(mousedown)': 'onPointerDown($event)',
   },
 })
 export class NxaModelPickerContent {
   protected readonly picker = inject(NxaModelPicker);
 
-  protected onPointerDown(event: PointerEvent): void {
+  protected onPointerDown(event: MouseEvent): void {
     const target = event.target instanceof Element ? event.target : null;
     if (!target?.closest('input, textarea, select, button, [tabindex]')) event.preventDefault();
   }
@@ -111,6 +114,7 @@ export class NxaModelPickerList {
     '[attr.data-disabled]': "disabled() ? '' : null",
     // Keeps the focus where it is (trigger or search) when the option is pressed.
     '(pointerdown)': '$event.preventDefault()',
+    '(mousedown)': '$event.preventDefault()',
     '(click)': 'picker.select(option().id)',
     '(pointermove)': 'onPointerMove()',
   },

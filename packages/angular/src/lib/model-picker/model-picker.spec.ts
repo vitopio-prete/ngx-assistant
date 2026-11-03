@@ -282,6 +282,31 @@ describe('nxaModelPicker', () => {
     expect(search.defaultPrevented).toBe(false);
   });
 
+  it('cancels the mousedown that follows a tap on the content and on an option', async () => {
+    await setup((host) => host.withSearch.set(true));
+    await click(el('.trigger'));
+
+    const mousedown = (target: HTMLElement) => {
+      const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+      target.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(mousedown(el('.gap'))).toBe(true);
+    expect(mousedown(all('.item')[1]!)).toBe(true);
+    expect(mousedown(el('.search'))).toBe(false);
+  });
+
+  it('starts on the first model that can be picked when the first one is disabled', async () => {
+    await setup((host) =>
+      host.models.set([
+        { id: 'locked', name: 'Locked', disabled: true },
+        { id: 'open', name: 'Open' },
+      ]),
+    );
+    expect(el('.trigger').textContent!.trim()).toBe('Open');
+    expect((await send('hi')).config?.modelName).toBe('open');
+  });
+
   it('picks with Space on the open trigger, without the keyup reopening it', async () => {
     await setup();
     const trigger = el('.trigger');
