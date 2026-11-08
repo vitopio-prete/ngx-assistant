@@ -20,7 +20,9 @@ that talks to a streaming backend over HTTP.
   the backend as the tool result. Any other tool shows in the tool fallback.
 - **Model selector:** the model and its reasoning effort, picked in the composer, go in the model
   context of the thread list, so every run of every conversation asks for them. Each model has an
-  icon, and a third model is listed but disabled, with the reason under its name.
+  icon; the free models of OpenRouter are listed but disabled, with the reason under their name,
+  until an OpenRouter account is connected.
+- **Real models, for free:** see [Free models on OpenRouter](#free-models-on-openrouter).
 - **Composer:** Enter to send, Shift+Enter for a new line, Stop during a run, which aborts the
   request; attach images or text files with the button, by pasting or by dropping them.
 - **Layouts and theme:** the header switches between the full page and a widget, where the same
@@ -57,14 +59,54 @@ answers the `fetch` calls to `/api/` as a server would, and keeps the conversati
 `localStorage`. The app does not know: it uses plain `fetch`, and the replies are the same UI
 message streams that AI SDK's `streamText(...).toUIMessageStreamResponse()` sends.
 
-Its model is deterministic. It repeats the last message, numbers each regenerated take
+The simulated models are deterministic. Echo repeats the last message, numbers each regenerated take
 (`Echo (2): ...`) and names the attached files; the Shout model answers in capitals, and a
 reasoning effort adds a reasoning part. `weather in <city>` calls `get_weather`,
 `send an email to <address>` calls `send_email`, `/error` fails the request and `/error-stream`
 fails the reply halfway.
 
+## Free models on OpenRouter
+
+The demo can also talk to the free models of [OpenRouter](https://openrouter.ai) (the ones whose id
+ends with `:free`), on the visitor's own account: the demo has no key and no server of its own, so
+it costs nothing to run.
+
+1. Create an OpenRouter account (free).
+2. Open **OpenRouter** in the header of the demo and pick **Connect OpenRouter**. OpenRouter asks
+   you to sign in and approve, then sends you back to the demo, which exchanges the code it got for
+   a key (OAuth with PKCE, in the browser). Or paste a key you made on OpenRouter.
+3. Pick a model in the composer and write.
+
+The key is kept in this browser's `localStorage` until **Disconnect**. The client sends it to its
+backend in the `Authorization` header (the `headers` option of `provideDataStreamRuntime`), as an
+app would to its own server, and the backend calls OpenRouter with it. Here the backend runs in the
+page, so the key goes nowhere but OpenRouter; with a backend of your own, it goes to that backend
+too. Disconnecting forgets the key here; delete it on OpenRouter to revoke it.
+
+- **The models:** `GET /api/models` reads the models list of OpenRouter once per page and keeps the
+  free ones that answer in text, with their names. The list changes often, so it is not in the
+  code. Each one gets the logo of its maker, from `public/providers/`.
+- **The replies:** `POST /api/chat` sends a model of OpenRouter (`openrouter/<id>`) to its chat
+  completions in streaming, and turns the stream into the UI message stream the app reads: the
+  reasoning, the text and the tool calls. Stop aborts the request to OpenRouter.
+- **Tools:** a model that takes tools gets `get_weather` and `send_email`, as the simulated ones.
+  The backend runs `get_weather` and calls the model again with the result, up to 4 calls per
+  reply; `send_email` waits for the user, whose answer goes to the model in the next request. A
+  tool the backend does not know gets an error as its result. Images go to the models that take
+  them.
+- **Limits:** free models allow 20 requests a minute, and 50 a day per account (1000 once the
+  account has bought 10 credits). A refused request shows OpenRouter's reason, with no retry.
+  Conversation titles stay simulated, so they do not count.
+
+The logos are from [Lobe Icons](https://github.com/lobehub/lobe-icons) (MIT, see
+`public/providers/LICENSE`), unchanged. Model names and logos are trademarks of their owners, used
+only to say which model is which; ngx-assistant is not affiliated with them.
+
+## Using a real backend
+
 To use a real backend, remove `installFakeBackend()` from `src/main.ts` and serve `/api/chat` and
-`/api/threads` (see `src/app/backend-client.ts` for what the thread routes take and return).
+`/api/threads` (see `src/app/backend-client.ts` for what the thread routes take and return), and
+`/api/models` for the OpenRouter models (`src/backend/openrouter-models.ts`).
 
 ```bash
 pnpm run dev     # from the repository root: builds the packages and serves the demo
