@@ -1,4 +1,5 @@
 import { chat } from './chat';
+import { models } from './openrouter-models';
 import { BackendStore } from './storage';
 import { threads } from './threads';
 
@@ -13,6 +14,11 @@ const LATENCY_MS = 30;
 export function installFakeBackend() {
   const storage = new BackendStore();
   const network = globalThis.fetch?.bind(globalThis);
+  // What the backend fetches itself goes to the network, as from a server.
+  const fetchNetwork = (input: RequestInfo | URL, init?: RequestInit) => {
+    if (!network) throw new TypeError('No network to fetch from');
+    return network(input, init);
+  };
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(
@@ -27,6 +33,7 @@ export function installFakeBackend() {
     const request = typeof input === 'object' && 'method' in input ? input : undefined;
     const signal = init?.signal ?? request?.signal ?? null;
     const method = (init?.method ?? request?.method ?? 'GET').toUpperCase();
+    const headers = new Headers(init?.headers ?? request?.headers);
     const body = typeof init?.body === 'string' ? init.body : ((await request?.text()) ?? '');
     await new Promise((resolve) => setTimeout(resolve, LATENCY_MS));
     if (signal?.aborted) throw new DOMException('The request was aborted.', 'AbortError');
@@ -37,10 +44,17 @@ export function installFakeBackend() {
       .filter(Boolean)
       .map(decodeURIComponent);
     try {
-      if (route === 'chat' && method === 'POST') return await chat(body, signal);
+      if (route === 'chat' && method === 'POST') {
+        const authorization = headers.get('Authorization');
+        return await chat(body, signal, { authorization, network: fetchNetwork });
+      }
+      if (route === 'models' && method === 'GET' && !segments.length)
+        return await models(fetchNetwork);
       if (route === 'threads') return await threads(storage, method, segments, body, signal);
       return new Response('Not found', { status: 404 });
     } catch (error) {
+      // An aborted request fails the fetch, as over the network.
+      if ((error as { name?: unknown } | null)?.name === 'AbortError') throw error;
       return new Response(error instanceof Error ? error.message : String(error), { status: 500 });
     }
   };

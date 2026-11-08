@@ -8,6 +8,7 @@ import {
 } from '@ngx-assistant/angular';
 import { demoAttachments } from './attachments';
 import { threadHistory, threadListAdapter } from './backend-client';
+import { openRouterHeaders } from './openrouter-account';
 import { EmailApproval, WeatherCard } from './tool-cards';
 
 /**
@@ -26,6 +27,8 @@ export const appConfig: ApplicationConfig = {
           api: '/api/chat',
           // Lets the backend tell a regenerated reply from a new message.
           sendExtraMessageFields: true,
+          // The OpenRouter key of the visitor, for the backend to call the free models with.
+          headers: openRouterHeaders,
           adapters: { attachments: demoAttachments() },
         }),
       ],
