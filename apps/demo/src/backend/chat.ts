@@ -1,3 +1,6 @@
+import { openRouterChat } from './openrouter-chat';
+import { forecastFor } from './weather';
+import { OPENROUTER_PREFIX, type Network } from './openrouter-models';
 import {
   uiMessageStreamResponse,
   writeReasoning,
@@ -15,15 +18,16 @@ const FAIL_COMMAND = '/error';
 const FAIL_STREAM_COMMAND = '/error-stream';
 
 /** What `provideDataStreamRuntime` posts: the conversation and the model context config. */
-interface ChatRequest {
+export interface ChatRequest {
+  system?: string;
   messages: Message[];
   modelName?: string;
   reasoningEffort?: string;
 }
 
-type Part =
+export type Part =
   | { type: 'text'; text: string }
-  | { type: 'file'; filename?: string; mediaType: string }
+  | { type: 'file'; filename?: string; mediaType: string; data?: unknown }
   | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }
   | {
       type: 'tool-result';
@@ -32,7 +36,7 @@ type Part =
       output: { type: string; value: unknown };
     };
 
-type Message =
+export type Message =
   | { role: 'system'; content: string }
   | { role: 'user' | 'assistant' | 'tool'; content: Part[]; unstable_id?: string };
 
@@ -46,10 +50,17 @@ const takes = new Map<string, number>();
  * `POST /api/chat`: a deterministic stand-in for a model behind an AI SDK route. It echoes the
  * last message, calls `get_weather` (run here, on the server) for "weather in <city>", and
  * `send_email` (a tool without `execute`: the user approves it in the browser) for "send an email
- * to <address>".
+ * to <address>". The models of OpenRouter (`openrouter/...`) go to {@link openRouterChat}.
  */
-export async function chat(body: string, signal: AbortSignal | null): Promise<Response> {
+export async function chat(
+  body: string,
+  signal: AbortSignal | null,
+  { authorization, network }: { authorization: string | null; network: Network },
+): Promise<Response> {
   const request = JSON.parse(body) as ChatRequest;
+  if (request.modelName?.startsWith(OPENROUTER_PREFIX)) {
+    return openRouterChat(request, authorization, signal, network);
+  }
   const last = request.messages.at(-1);
   if (!last || last.role === 'system')
     return new Response('No message to answer.', { status: 400 });
@@ -159,13 +170,4 @@ async function answerToolResult(
 function finish(write: WriteChunk, finishReason: 'stop' | 'tool-calls') {
   write({ type: 'finish-step' });
   write({ type: 'finish', finishReason });
-}
-
-const CONDITIONS = ['sunny', 'cloudy', 'rainy', 'windy', 'foggy'];
-
-/** The same city always gets the same weather. */
-function forecastFor(city: string) {
-  let hash = 0;
-  for (const char of city.toLowerCase()) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return { city, temperature: 5 + (hash % 25), condition: CONDITIONS[hash % CONDITIONS.length] };
 }

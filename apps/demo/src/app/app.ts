@@ -8,43 +8,18 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { provideSuggestions, type ModelOption } from '@ngx-assistant/angular';
-import { NxaAssistantModal, NxaModelSelector, NxaThread, NxaThreadList } from './chat';
-
-/** A small stroked icon as a `data:` URL, for the `icon` of a model. */
-const icon = (color: string, path: string) =>
-  'data:image/svg+xml,' +
-  encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${color}" ` +
-      `stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`,
-  );
-
-/**
- * The models the demo backend knows: the request names the one picked. The last one shows a model
- * the user cannot pick yet.
- */
-const MODELS: readonly ModelOption[] = [
-  {
-    id: 'echo',
-    name: 'Echo',
-    description: 'Repeats your message',
-    icon: icon('#0d9488', 'M3 12h2 M7 8v8 M11 5v14 M15 8v8 M19 11v2'),
-    efforts: true,
-  },
-  {
-    id: 'shout',
-    name: 'Shout',
-    description: 'Repeats it in capitals',
-    icon: icon('#ea580c', 'M4 10v4h3l7 4V6l-7 4z M18 9a4 4 0 0 1 0 6'),
-  },
-  {
-    id: 'pro',
-    name: 'Pro',
-    description: 'Sign in to use',
-    icon: icon('#7c3aed', 'M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z'),
-    disabled: true,
-  },
-];
+import { provideSuggestions } from '@ngx-assistant/angular';
+import {
+  NxaAssistantModal,
+  NxaModelSelector,
+  NxaModelSelectorIcon,
+  NxaThread,
+  NxaThreadList,
+} from './chat';
+import { DemoModels } from './demo-models';
+import { ModelIcon } from './model-icon';
+import { OpenRouterAccount } from './openrouter-account';
+import { OpenRouterPanel } from './openrouter-panel';
 
 /** How the chat is shown: a full page with the conversations beside it, or a floating widget. */
 type Layout = 'page' | 'widget';
@@ -55,12 +30,21 @@ const TOGGLE =
 /**
  * The demo shell, on the runtimes of the app config. Every component under `./chat` was copied by
  * `ng add` and the generators, and is used as it was copied: the demo only gives them inputs and
- * providers. The model picked in the composer applies to every conversation.
+ * providers. The model picked in the composer applies to every conversation: a simulated one, or a
+ * free model of OpenRouter once the visitor connects an account.
  */
 @Component({
   selector: 'nxa-demo-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NxaThread, NxaThreadList, NxaAssistantModal, NxaModelSelector],
+  imports: [
+    NxaThread,
+    NxaThreadList,
+    NxaAssistantModal,
+    NxaModelSelector,
+    NxaModelSelectorIcon,
+    ModelIcon,
+    OpenRouterPanel,
+  ],
   host: {
     class: 'flex h-dvh flex-col bg-nxa-background text-nxa-foreground',
     '(click)': 'onSidebarClick($event)',
@@ -96,9 +80,10 @@ const TOGGLE =
       }
       <span class="text-sm font-semibold">ngx-assistant</span>
       <span class="hidden text-xs text-nxa-muted-foreground sm:inline">
-        Backend simulated in the browser
+        Simulated backend, or free models on OpenRouter
       </span>
       <div class="ms-auto flex items-center gap-1">
+        <nxa-demo-openrouter-panel [toggleClass]="toggle" />
         <div role="group" aria-label="Layout" class="flex items-center gap-1">
           @for (option of layouts; track option) {
             <button
@@ -142,10 +127,14 @@ const TOGGLE =
             nxaComposerTools
             variant="ghost"
             side="top"
-            [models]="models"
+            [models]="models()"
             [(value)]="model"
             [(effort)]="effort"
-          />
+          >
+            <ng-template nxaModelSelectorIcon let-model>
+              <nxa-demo-model-icon [model]="model" />
+            </ng-template>
+          </nxa-model-selector>
         </nxa-thread>
       </div>
     } @else {
@@ -159,8 +148,9 @@ const TOGGLE =
         </p>
         <p>
           The backend echoes your message word by word, checks the weather in a city, or asks before
-          sending an email. Edit a message or regenerate a reply to create branches, attach images
-          or text files, or include /error or /error-stream to see a failure.
+          sending an email. Connect OpenRouter in the header to talk to free models instead. Edit a
+          message or regenerate a reply to create branches, attach images or text files, or include
+          /error or /error-stream to see a failure.
         </p>
       </main>
       <nxa-assistant-modal>
@@ -168,16 +158,21 @@ const TOGGLE =
           nxaComposerTools
           variant="ghost"
           side="top"
-          [models]="models"
+          [models]="models()"
           [(value)]="model"
           [(effort)]="effort"
-        />
+        >
+          <ng-template nxaModelSelectorIcon let-model>
+            <nxa-demo-model-icon [model]="model" />
+          </ng-template>
+        </nxa-model-selector>
       </nxa-assistant-modal>
     }
   `,
 })
 export class App {
-  protected readonly models = MODELS;
+  private readonly account = inject(OpenRouterAccount);
+  protected readonly models = inject(DemoModels).options;
   protected readonly layouts: readonly Layout[] = ['page', 'widget'];
   protected readonly welcome = 'How can I help?';
   protected readonly toggle = TOGGLE;
@@ -194,6 +189,14 @@ export class App {
   private readonly sidebarToggle = viewChild<ElementRef<HTMLElement>>('sidebarToggle');
 
   constructor() {
+    // Back from OpenRouter's sign-in: the address carries the code for the key.
+    void this.account.completeSignIn();
+    // A model that can no longer be picked (the account was disconnected) gives way to Echo.
+    effect(() => {
+      const picked = this.models().find((m) => m.id === this.model());
+      if (picked?.disabled) this.model.set('echo');
+    });
+
     const root = inject(DOCUMENT).documentElement;
     effect(() => {
       root.classList.toggle('dark', this.dark());
