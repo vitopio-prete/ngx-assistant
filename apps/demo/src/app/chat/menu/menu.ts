@@ -9,7 +9,7 @@ import type { ConnectedPosition } from '@angular/cdk/overlay';
 
 /** The classes of a menu panel. */
 export const MENU_PANEL =
-  'flex min-w-36 flex-col rounded-xl border border-nxa-border bg-nxa-background p-1.5 text-nxa-foreground shadow-lg outline-none';
+  'nxa-animate-in nxa-zoom-in-95 flex min-w-36 flex-col rounded-xl border border-nxa-border bg-nxa-background p-1.5 text-nxa-foreground shadow-lg outline-none';
 
 /** The classes of a menu item. */
 export const MENU_ITEM =

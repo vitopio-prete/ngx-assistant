@@ -17,6 +17,7 @@ import {
   injectAttachment,
 } from '@ngx-assistant/angular';
 import { NxaIcon } from '../icons';
+import { NxaTooltip } from '../tooltip/tooltip';
 
 /**
  * An attachment as a tile: a preview for an image, a short type label for any other file, its
@@ -26,7 +27,7 @@ import { NxaIcon } from '../icons';
 @Component({
   selector: 'nxa-attachment',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NxaAttachmentThumb, NxaAttachmentRemove, NxaIcon],
+  imports: [NxaAttachmentThumb, NxaAttachmentRemove, NxaIcon, NxaTooltip],
   hostDirectives: [NxaAttachmentRoot],
   host: {
     class:
@@ -55,8 +56,9 @@ import { NxaIcon } from '../icons';
     @if (removable()) {
       <button
         nxaAttachmentRemove
-        class="absolute -end-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full border border-nxa-border bg-nxa-background text-nxa-muted-foreground outline-none hover:text-nxa-foreground focus-visible:ring-2 focus-visible:ring-nxa-ring"
+        class="absolute -end-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full border border-nxa-border bg-nxa-background text-nxa-muted-foreground outline-none transition-[color,scale] duration-150 hover:text-nxa-foreground focus-visible:ring-2 focus-visible:ring-nxa-ring motion-safe:active:scale-90"
         [attr.aria-label]="'Remove ' + state().name"
+        [nxaTooltip]="'Remove ' + state().name"
       >
         <nxa-icon name="x" class="size-3" />
       </button>

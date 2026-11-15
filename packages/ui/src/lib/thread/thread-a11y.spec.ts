@@ -327,6 +327,28 @@ describe('nxa-thread messages', () => {
     await settle(fixture, () => expect(writeText).toHaveBeenCalledWith('You are welcome.'));
     await settle(fixture, () => expect(copy.hasAttribute('data-nxa-copied')).toBe(true));
     expect(copy.querySelector('nxa-icon')?.innerHTML).toContain('M5 12.5l4.5 4.5L19 7.5');
+    expect(copy.querySelector('nxa-icon')?.classList).toContain('nxa-zoom-in-50');
+  });
+
+  it('gives every icon button a tooltip with its name, and no native title', async () => {
+    const { el, fixture } = await mountThread(conversation);
+    await settle(fixture, () => expect(rows(el)).toHaveLength(4));
+
+    const iconButtons = [...el.querySelectorAll<HTMLButtonElement>('button[aria-label]')].filter(
+      (node) => !node.textContent?.trim(),
+    );
+    expect(iconButtons.length).toBeGreaterThan(4);
+    for (const node of iconButtons) {
+      expect(node.hasAttribute('title'), node.outerHTML).toBe(false);
+    }
+    const copy = rows(el)[3]!.querySelector<HTMLButtonElement>('[aria-label="Copy"]')!;
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    copy.focus();
+    const tooltip = document.querySelector<HTMLElement>('[role="tooltip"]');
+    expect(tooltip?.textContent?.trim()).toBe('Copy');
+    expect(tooltip?.getAttribute('aria-hidden')).toBe('true');
+    copy.blur();
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
   });
 
   it('shows a writing indicator while a reply has no content yet', async () => {

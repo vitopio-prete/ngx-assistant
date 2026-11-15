@@ -1,6 +1,6 @@
 /** The classes of the icon buttons of the action bars. */
 export const ACTION_BUTTON =
-  'flex size-7 items-center justify-center rounded-md text-nxa-muted-foreground outline-none transition-colors hover:bg-nxa-accent hover:text-nxa-foreground focus-visible:ring-2 focus-visible:ring-nxa-ring disabled:pointer-events-none disabled:opacity-40';
+  'flex size-7 items-center justify-center rounded-md text-nxa-muted-foreground outline-none transition-[color,background-color,scale] duration-150 hover:bg-nxa-accent hover:text-nxa-foreground focus-visible:ring-2 focus-visible:ring-nxa-ring disabled:pointer-events-none disabled:opacity-40 motion-safe:active:scale-90';
 
 /**
  * The classes of an action bar that fades out while auto-hidden but stays in the tab order, and

@@ -10,6 +10,7 @@ import {
   NxaThreadViewportFooter,
 } from '@ngx-assistant/angular';
 import { NxaIcon } from '../icons';
+import { NxaTooltip } from '../tooltip/tooltip';
 import { NxaAssistantMessage } from './assistant-message';
 import { NxaComposer } from './composer';
 import { NxaEditComposer } from './edit-composer';
@@ -53,6 +54,7 @@ import { NxaUserMessage } from './user-message';
     NxaEditComposer,
     NxaComposer,
     NxaIcon,
+    NxaTooltip,
   ],
   host: { class: 'flex min-h-0 flex-col bg-nxa-background text-nxa-foreground' },
   template: `
@@ -95,8 +97,8 @@ import { NxaUserMessage } from './user-message';
               nxaScrollToBottom
               behavior="smooth"
               aria-label="Scroll to bottom"
-              title="Scroll to bottom"
-              class="absolute -top-11 flex size-8 items-center justify-center rounded-full border border-nxa-border bg-nxa-background shadow-sm transition-opacity outline-none hover:bg-nxa-accent focus-visible:ring-2 focus-visible:ring-nxa-ring disabled:invisible disabled:opacity-0"
+              nxaTooltip="Scroll to bottom"
+              class="absolute -top-11 flex size-8 items-center justify-center rounded-full border border-nxa-border bg-nxa-background shadow-sm transition-[opacity,scale] duration-150 outline-none hover:bg-nxa-accent motion-safe:active:scale-90 focus-visible:ring-2 focus-visible:ring-nxa-ring disabled:invisible disabled:opacity-0"
             >
               <nxa-icon name="arrow-down" class="size-4" />
             </button>

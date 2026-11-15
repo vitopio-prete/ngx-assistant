@@ -15,6 +15,7 @@ import {
   injectThreadListItem,
 } from '@ngx-assistant/angular';
 import { NxaIcon } from '../icons';
+import { NxaTooltip } from '../tooltip/tooltip';
 import { MENU_BESIDE, MENU_ITEM, MENU_ITEM_DESTRUCTIVE, MENU_PANEL } from '../menu/menu';
 import { UNTITLED_THREAD } from './thread-list-groups';
 
@@ -41,6 +42,7 @@ import { UNTITLED_THREAD } from './thread-list-groups';
     NxaThreadListItemUnarchive,
     NxaThreadListItemDelete,
     NxaIcon,
+    NxaTooltip,
   ],
   hostDirectives: [NxaThreadListItemRoot],
   host: {
@@ -85,9 +87,9 @@ import { UNTITLED_THREAD } from './thread-list-groups';
       [cdkMenuTriggerFor]="menu"
       [cdkMenuPosition]="position"
       aria-label="More options"
-      title="More options"
+      nxaTooltip="More options"
       data-slot="thread-list-item-more"
-      class="absolute end-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-nxa-muted-foreground opacity-0 outline-none group-hover:opacity-100 group-has-focus-visible:opacity-100 group-data-active:opacity-100 hover:bg-nxa-accent hover:text-nxa-foreground focus-visible:ring-2 focus-visible:ring-nxa-ring aria-expanded:bg-nxa-accent aria-expanded:opacity-100"
+      class="absolute end-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-nxa-muted-foreground opacity-0 outline-none transition-[opacity,scale] duration-150 motion-safe:active:scale-90 group-hover:opacity-100 group-has-focus-visible:opacity-100 group-data-active:opacity-100 hover:bg-nxa-accent hover:text-nxa-foreground focus-visible:ring-2 focus-visible:ring-nxa-ring aria-expanded:bg-nxa-accent aria-expanded:opacity-100"
     >
       <nxa-icon name="more" class="size-3.5" />
     </button>
