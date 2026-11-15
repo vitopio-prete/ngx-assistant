@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, effect, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, signal } from '@angular/core';
 import {
   provideLocalRuntime,
   provideRemoteThreadListRuntime,
@@ -22,6 +22,9 @@ const MODELS: ModelOption[] = [
   { id: 'balanced', name: 'Balanced', description: 'Everyday work', efforts: true },
   { id: 'deep', name: 'Deep', description: 'Long reasoning', efforts: true },
 ];
+
+/** The model the preview locks until its pretend sign in. */
+const LOCKED = 'deep';
 
 /** A page to try the styled components by hand, in light and dark. */
 @Component({
@@ -61,7 +64,7 @@ const MODELS: ModelOption[] = [
   template: `
     <header class="flex items-center gap-3 border-b border-nxa-border px-4 py-2">
       <span class="text-sm font-semibold">ngx-assistant UI preview</span>
-      <nxa-model-selector [models]="models" />
+      <nxa-model-selector [models]="models()" [(value)]="model" />
       <nav class="ms-auto flex items-center gap-1" aria-label="Layout">
         @for (option of layouts; track option) {
           <button
@@ -86,9 +89,33 @@ const MODELS: ModelOption[] = [
     @if (layout() === 'sidebar') {
       <div class="flex min-h-0 flex-1">
         <aside class="w-64 shrink-0 overflow-y-auto border-e border-nxa-border p-2">
-          <nxa-thread-list />
+          <nxa-thread-list class="min-h-full">
+            <button
+              nxaThreadListFooter
+              type="button"
+              class="flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-sm outline-none hover:bg-nxa-muted focus-visible:ring-2 focus-visible:ring-nxa-ring"
+              (click)="signedIn.set(!signedIn())"
+            >
+              @if (signedIn()) {
+                <span
+                  aria-hidden="true"
+                  class="flex size-6 items-center justify-center rounded-full bg-nxa-primary text-xs text-nxa-primary-foreground"
+                  >P</span
+                >
+                <span class="truncate">Preview user · Sign out</span>
+              } @else {
+                Sign in
+              }
+            </button>
+          </nxa-thread-list>
         </aside>
-        <nxa-thread class="min-h-0 flex-1" />
+        <nxa-thread class="min-h-0 flex-1">
+          @if (!signedIn()) {
+            <p nxaComposerNotice role="status" class="px-2 text-xs text-nxa-muted-foreground">
+              Sign in to use the Deep model.
+            </p>
+          }
+        </nxa-thread>
       </div>
     } @else {
       <main
@@ -105,7 +132,16 @@ const MODELS: ModelOption[] = [
   `,
 })
 export class PreviewApp {
-  protected readonly models = MODELS;
+  /** A pretend sign in: it only unlocks a model, the preview has no accounts. */
+  protected readonly signedIn = signal(false);
+  protected readonly model = signal<string | undefined>(undefined);
+  protected readonly models = computed(() =>
+    MODELS.map((m) =>
+      m.id === LOCKED && !this.signedIn()
+        ? { ...m, disabled: true, description: 'Sign in to use' }
+        : m,
+    ),
+  );
   protected readonly layouts = ['sidebar', 'modal'] as const;
   protected readonly layout = signal<'sidebar' | 'modal'>('sidebar');
   protected readonly dark = signal(matchMedia('(prefers-color-scheme: dark)').matches);
