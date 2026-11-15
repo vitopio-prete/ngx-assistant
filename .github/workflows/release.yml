@@ -1,0 +1,98 @@
+name: Release
+
+# Runs when a release branch is merged into main (gitflow). release-please opens or updates the
+# release pull request with the next versions and changelogs; merging that pull request tags the
+# release, and this workflow then publishes the packages to npm.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Never cancel a run that may be publishing.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      # Both packages share the version, so the engine's tag and commit stand for the release.
+      sha: ${{ steps.release.outputs['packages/engine--sha'] }}
+      version: ${{ steps.release.outputs['packages/engine--version'] }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          # Releases are cut from main, whatever the default branch of the repository is.
+          target-branch: main
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish:
+    needs: release-please
+    if: needs.release-please.outputs.releases_created == 'true'
+    runs-on: ubuntu-latest
+    # The npm trusted publisher names this workflow and this environment.
+    environment: npm
+    permissions:
+      contents: read
+      # OIDC token for npm trusted publishing and for the provenance statement.
+      id-token: write
+    steps:
+      # The commit release-please tagged, even if main moved on in the meantime.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+      - uses: ./.github/actions/setup
+
+      - name: Unit tests
+        run: pnpm run test
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Engine loads as plain Node ESM
+        run: pnpm run smoke
+
+      - name: Pack and check the packages
+        run: pnpm run check:packages "$RUNNER_TEMP/packages"
+
+      # Trusted publishing needs npm 11.5.1 or later.
+      - name: Use npm 11
+        run: npm install --global npm@11.21.2
+
+      - name: Publish to npm
+        env:
+          # Only for the first release, before the trusted publishers exist on npm. Without it,
+          # npm authenticates with the OIDC token of this job.
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          RELEASE_VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
+          fi
+          # The engine first: the Angular package depends on it.
+          for package in engine angular; do
+            tarball="$(ls "$RUNNER_TEMP/packages/$package"/*.tgz)"
+            name="$(tar -xzOf "$tarball" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0)).name')"
+            version="$(tar -xzOf "$tarball" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0)).version')"
+            if [ "$version" != "$RELEASE_VERSION" ]; then
+              echo "$name is at $version, but the release is $RELEASE_VERSION"
+              exit 1
+            fi
+            # A rerun skips what an earlier run already published.
+            if npm view "$name@$version" version > /dev/null 2>&1; then
+              echo "$name@$version is already on npm"
+              continue
+            fi
+            npm publish "$tarball" --access public --provenance
+          done
