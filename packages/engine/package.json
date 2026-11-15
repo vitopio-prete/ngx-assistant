@@ -51,7 +51,7 @@
     "provenance": true
   },
   "scripts": {
-    "build": "tsc -p tsconfig.lib.json && tsc-alias -p tsconfig.lib.json --resolve-full-paths",
+    "build": "tsc -p tsconfig.lib.json && tsc-alias -p tsconfig.lib.json --resolve-full-paths && node scripts/guard-node-env.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json",
     "smoke": "node --input-type=module -e \"const e = await import('@ngx-assistant/engine'); if (typeof e.LocalRuntimeCore !== 'function') throw new Error('LocalRuntimeCore missing');\""

@@ -34,7 +34,8 @@ ng add @ngx-assistant/angular
   replace with a call to your model, and provides `provideLocalRuntime(() => inject(ChatModel))`.
   An app that already provides a runtime keeps it;
 - defines `process.env.NODE_ENV` in the `production` and `development` configurations of the
-  build, which turns the development checks of the engine on in development builds;
+  build, which turns the development checks of the engine on in development builds (without it
+  the engine runs as in production);
 - raises the `initial` budgets of the build to 1 MB (warning) and 2 MB (error) when they are
   lower: the engine, markdown and the styled components take about 800 kB;
 - sets up Tailwind CSS v4 (`tailwindcss`, `@tailwindcss/postcss`, `.postcssrc.json` and

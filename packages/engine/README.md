@@ -23,9 +23,10 @@ The package is an ES module only.
 
 ## `process.env.NODE_ENV`
 
-The engine reads `process.env.NODE_ENV` to enable development-only checks, and expects the
-application build to replace it. With the Angular CLI, add a `define` to the application's
-build options:
+The engine reads `process.env.NODE_ENV` to turn on development-only checks (warnings about tool
+calls and state that is not JSON). When the application build replaces it, as `define` does in
+the Angular CLI, Vite or esbuild, the checks follow the build: on in development, off in
+production. With the Angular CLI, `ng add @ngx-assistant/angular` adds the `define`; by hand:
 
 ```json
 "define": {
@@ -33,6 +34,5 @@ build options:
 }
 ```
 
-Without the replacement, loading the engine in a browser throws `ReferenceError: process is not
-defined`. Bundlers that already replace it (Vite, esbuild with `platform: "browser"`) and Node
-need nothing.
+Without the replacement the engine still loads: in a browser, where `process` does not exist, it
+runs as in production and the checks stay off. In Node it reads the variable of the process.
