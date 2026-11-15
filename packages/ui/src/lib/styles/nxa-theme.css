@@ -78,43 +78,60 @@
 /* Typography of the markdown rendered by nxa-markdown-text. */
 @layer components {
   .nxa-md {
-    line-height: 1.7;
+    line-height: 1.625;
     overflow-wrap: anywhere;
   }
-  .nxa-md > :first-child {
+  /* Each top-level block is its own element; it adds no box of its own. */
+  .nxa-md-block {
+    display: contents;
+  }
+  .nxa-md > .nxa-md-block:first-child > :first-child {
     margin-top: 0;
   }
-  .nxa-md > :last-child {
+  .nxa-md > .nxa-md-block:last-child > :last-child {
     margin-bottom: 0;
   }
   .nxa-md p,
   .nxa-md ul,
   .nxa-md ol,
-  .nxa-md pre,
   .nxa-md blockquote,
-  .nxa-md table {
+  .nxa-md .nxa-md-code,
+  .nxa-md .nxa-md-table {
     margin: 0.75rem 0;
   }
   .nxa-md h1,
   .nxa-md h2,
   .nxa-md h3,
-  .nxa-md h4 {
+  .nxa-md h4,
+  .nxa-md h5,
+  .nxa-md h6 {
     margin: 1.25rem 0 0.5rem;
     font-weight: 600;
-    line-height: 1.3;
+    line-height: 1.4;
   }
   .nxa-md h1 {
-    font-size: 1.5rem;
-  }
-  .nxa-md h2 {
     font-size: 1.25rem;
   }
-  .nxa-md h3 {
+  .nxa-md h2 {
     font-size: 1.125rem;
+  }
+  .nxa-md h3,
+  .nxa-md h4 {
+    margin-top: 1rem;
+    font-size: 1rem;
+  }
+  .nxa-md h4,
+  .nxa-md h6 {
+    font-weight: 500;
+  }
+  .nxa-md h5,
+  .nxa-md h6 {
+    margin: 0.75rem 0 0.25rem;
+    font-size: 0.875rem;
   }
   .nxa-md ul,
   .nxa-md ol {
-    padding-inline-start: 1.5rem;
+    padding-inline-start: 1.25rem;
   }
   .nxa-md ul {
     list-style: disc;
@@ -125,8 +142,14 @@
   .nxa-md li {
     margin: 0.25rem 0;
   }
+  .nxa-md li::marker {
+    color: var(--nxa-muted-foreground);
+  }
   .nxa-md li > p {
     margin: 0;
+  }
+  .nxa-md li > :is(ul, ol) {
+    margin: 0.25rem 0;
   }
   .nxa-md a {
     text-decoration: underline;
@@ -136,49 +159,204 @@
     font-weight: 600;
   }
   .nxa-md code {
-    border-radius: 0.25rem;
+    border-radius: 0.375rem;
     background: var(--nxa-muted);
     padding: 0.125rem 0.375rem;
-    font-size: 0.875em;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 0.85em;
+  }
+  .nxa-md blockquote {
+    border-inline-start: 2px solid color-mix(in oklab, var(--nxa-muted-foreground) 30%, transparent);
+    padding-inline-start: 1rem;
+    color: var(--nxa-muted-foreground);
+  }
+  .nxa-md hr {
+    margin: 0.75rem 0;
+    border-color: color-mix(in oklab, var(--nxa-muted-foreground) 20%, transparent);
+  }
+
+  /* Code blocks: a header with the language and Copy, then the code. */
+  .nxa-md-code-header {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    border: 1px solid color-mix(in oklab, var(--nxa-border) 50%, transparent);
+    border-bottom: 0;
+    border-start-start-radius: 0.75rem;
+    border-start-end-radius: 0.75rem;
+    background: color-mix(in oklab, var(--nxa-muted) 50%, transparent);
+    padding: 0.25rem 0.375rem 0.25rem 0.875rem;
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+  .nxa-md-code-language {
+    color: var(--nxa-muted-foreground);
+    font-weight: 500;
+    text-transform: lowercase;
+  }
+  .nxa-md-code-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .nxa-md-code-copy {
+    display: inline-flex;
+    transition:
+      color 150ms,
+      background-color 150ms,
+      scale 150ms;
+    flex-shrink: 0;
+    border-radius: 0.375rem;
+    padding: 0.375rem;
+    color: var(--nxa-muted-foreground);
+    cursor: pointer;
+  }
+  .nxa-md-code-copy::before {
+    content: '';
+    width: 0.875rem;
+    height: 0.875rem;
+    background: currentColor;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 9h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z M5 15V5a1 1 0 0 1 1-1h10'/%3E%3C/svg%3E")
+      center / contain no-repeat;
+  }
+  .nxa-md-code-copy.nxa-md-code-copied::before {
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+  }
+  .nxa-md-code-copy:hover {
+    background: var(--nxa-accent);
+    color: var(--nxa-foreground);
+  }
+  .nxa-md-code-copy:focus-visible {
+    outline: 2px solid var(--nxa-ring);
+    outline-offset: 1px;
   }
   .nxa-md pre {
     overflow-x: auto;
-    border: 1px solid var(--nxa-border);
-    border-radius: 0.75rem;
-    background: var(--nxa-muted);
-    padding: 0.75rem 1rem;
-    font-size: 0.875rem;
-    line-height: 1.6;
+    margin: 0;
+    border: 1px solid color-mix(in oklab, var(--nxa-border) 50%, transparent);
+    border-top: 0;
+    border-end-start-radius: 0.75rem;
+    border-end-end-radius: 0.75rem;
+    background: color-mix(in oklab, var(--nxa-muted) 30%, transparent);
+    padding: 0.875rem;
+    font-size: 13px;
+    line-height: 1.625;
   }
   .nxa-md pre code {
+    border-radius: 0;
     background: transparent;
     padding: 0;
     font-size: inherit;
   }
-  .nxa-md blockquote {
-    border-inline-start: 2px solid var(--nxa-border);
-    padding-inline-start: 0.75rem;
-    color: var(--nxa-muted-foreground);
-  }
-  .nxa-md hr {
-    margin: 1rem 0;
-    border-color: var(--nxa-border);
+
+  /* Tables: full width, rounded, scrolling on their own when too wide. */
+  .nxa-md-table {
+    overflow-x: auto;
   }
   .nxa-md table {
-    display: block;
-    overflow-x: auto;
-    border-collapse: collapse;
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 0.875rem;
   }
   .nxa-md th,
   .nxa-md td {
-    border: 1px solid var(--nxa-border);
     padding: 0.375rem 0.75rem;
     text-align: start;
   }
   .nxa-md th {
     background: var(--nxa-muted);
-    font-weight: 600;
+    font-weight: 500;
+  }
+  .nxa-md th:first-child {
+    border-start-start-radius: 0.5rem;
+  }
+  .nxa-md th:last-child {
+    border-start-end-radius: 0.5rem;
+  }
+  .nxa-md td {
+    border-bottom: 1px solid color-mix(in oklab, var(--nxa-muted-foreground) 20%, transparent);
+    border-inline-start: 1px solid color-mix(in oklab, var(--nxa-muted-foreground) 20%, transparent);
+  }
+  .nxa-md td:last-child {
+    border-inline-end: 1px solid color-mix(in oklab, var(--nxa-muted-foreground) 20%, transparent);
+  }
+  .nxa-md tr:last-child > td:first-child {
+    border-end-start-radius: 0.5rem;
+  }
+  .nxa-md tr:last-child > td:last-child {
+    border-end-end-radius: 0.5rem;
+  }
+  .nxa-md .nxa-md-align-center {
+    text-align: center;
+  }
+  .nxa-md .nxa-md-align-right {
+    text-align: right;
+  }
+
+  /* A pulsing dot after the last thing written while the text streams. */
+  .nxa-md[data-nxa-status='running']:not(:has(> .nxa-md-block))::after,
+  .nxa-md[data-nxa-status='running']
+    > .nxa-md-block:last-child
+    > :where(:not(ol, ul, hr, .nxa-md-code, .nxa-md-table)):last-child::after,
+  .nxa-md[data-nxa-status='running']
+    > .nxa-md-block:last-child
+    > .nxa-md-code:last-child
+    code::after,
+  .nxa-md[data-nxa-status='running']
+    > .nxa-md-block:last-child
+    > .nxa-md-table:last-child
+    table
+    > :last-child
+    > tr:last-child
+    > :last-child::after,
+  .nxa-md[data-nxa-status='running']
+    > .nxa-md-block:last-child
+    > :where(ol, ul):last-child
+    > li:last-child:not(:has(> :is(ol, ul)))::after,
+  .nxa-md[data-nxa-status='running']
+    > .nxa-md-block:last-child
+    > :where(ol, ul):last-child
+    > li:last-child
+    > :where(ol, ul):last-child
+    > li:last-child:not(:has(> :is(ol, ul)))::after,
+  .nxa-md[data-nxa-status='running']
+    > .nxa-md-block:last-child
+    > :where(ol, ul):last-child
+    > li:last-child
+    > :where(ol, ul):last-child
+    > li:last-child
+    > :where(ol, ul):last-child
+    > li:last-child::after {
+    content: '\25cf';
+    margin-inline: 0.25rem;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    animation: nxa-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}
+
+@keyframes nxa-md-copied {
+  from {
+    opacity: 0;
+    scale: 0.5;
+  }
+}
+
+@keyframes nxa-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nxa-md[data-nxa-status='running'] *::after,
+  .nxa-md[data-nxa-status='running']::after {
+    animation: none;
   }
 }
 
@@ -219,6 +397,13 @@
 
 @media (prefers-reduced-motion: no-preference) {
   @layer components {
+    /* Copy on a code block: pressed like the icon buttons, the check zooms in. */
+    .nxa-md-code-copy:active {
+      scale: 0.9;
+    }
+    .nxa-md-code-copy.nxa-md-code-copied::before {
+      animation: nxa-md-copied 200ms cubic-bezier(0.2, 0, 0, 1);
+    }
     .nxa-animate-in {
       animation: nxa-enter var(--nxa-enter-duration, 150ms) cubic-bezier(0.2, 0, 0, 1)
         var(--nxa-enter-delay, 0ms) backwards;
