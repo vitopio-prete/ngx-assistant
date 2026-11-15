@@ -16,6 +16,7 @@ import {
   injectThread,
 } from '@ngx-assistant/angular';
 import { NxaIcon } from '../icons';
+import { NxaTooltip } from '../tooltip/tooltip';
 import { MENU_BELOW, MENU_ITEM, MENU_PANEL } from '../menu/menu';
 import { ACTION_BAR, ACTION_BUTTON } from './action-button';
 import { NxaBranchPicker } from './branch-picker';
@@ -56,8 +57,12 @@ import { NxaToolFallback } from './tool-fallback';
     NxaMessageFile,
     NxaMessageErrorNotice,
     NxaIcon,
+    NxaTooltip,
   ],
-  host: { class: 'flex flex-col gap-1', 'data-slot': 'assistant-message' },
+  host: {
+    class: 'nxa-animate-in nxa-slide-in-1 flex flex-col gap-1',
+    'data-slot': 'assistant-message',
+  },
   template: `
     <div data-slot="assistant-message-content" class="px-1 leading-relaxed break-words">
       <ng-container *nxaMessageParts="let part">
@@ -97,8 +102,12 @@ import { NxaToolFallback } from './tool-fallback';
     <div class="flex min-h-7 items-center gap-1">
       <nxa-branch-picker />
       <div nxaActionBarRoot hideWhenRunning autohide="not-last" [class]="actionBar">
-        <button nxaActionBarCopy [class]="button" aria-label="Copy" title="Copy">
-          <nxa-icon *nxaMessageIf="{ copied: true }; else copy" name="check" class="size-3.5" />
+        <button nxaActionBarCopy [class]="button" aria-label="Copy" nxaTooltip="Copy">
+          <nxa-icon
+            *nxaMessageIf="{ copied: true }; else copy"
+            name="check"
+            class="nxa-animate-in nxa-zoom-in-50 nxa-duration-200 size-3.5"
+          />
           <ng-template #copy><nxa-icon name="copy" class="size-3.5" /></ng-template>
         </button>
         @if (canFeedback()) {
@@ -106,7 +115,7 @@ import { NxaToolFallback } from './tool-fallback';
             nxaActionBarFeedbackPositive
             [class]="toggle"
             aria-label="Helpful"
-            title="Helpful"
+            nxaTooltip="Helpful"
           >
             <nxa-icon name="thumbs-up" class="size-3.5" />
           </button>
@@ -114,12 +123,12 @@ import { NxaToolFallback } from './tool-fallback';
             nxaActionBarFeedbackNegative
             [class]="toggle"
             aria-label="Not helpful"
-            title="Not helpful"
+            nxaTooltip="Not helpful"
           >
             <nxa-icon name="thumbs-down" class="size-3.5" />
           </button>
         }
-        <button nxaActionBarReload [class]="button" aria-label="Regenerate" title="Regenerate">
+        <button nxaActionBarReload [class]="button" aria-label="Regenerate" nxaTooltip="Regenerate">
           <nxa-icon name="refresh" class="size-3.5" />
         </button>
         <!-- Export and Read aloud need text: a menu of disabled items could not take the focus. -->
@@ -130,7 +139,7 @@ import { NxaToolFallback } from './tool-fallback';
             [cdkMenuPosition]="below"
             [class]="button"
             aria-label="More actions"
-            title="More actions"
+            nxaTooltip="More actions"
             data-slot="assistant-message-more"
           >
             <nxa-icon name="more" class="size-3.5" />

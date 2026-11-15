@@ -8,6 +8,7 @@ import {
   NxaMessageParts,
 } from '@ngx-assistant/angular';
 import { NxaIcon } from '../icons';
+import { NxaTooltip } from '../tooltip/tooltip';
 import { ACTION_BAR, ACTION_BUTTON } from './action-button';
 import { NxaAttachment } from './attachment';
 import { NxaBranchPicker } from './branch-picker';
@@ -31,19 +32,27 @@ import { NxaMessageFile } from './message-file';
     NxaBranchPicker,
     NxaMessageFile,
     NxaIcon,
+    NxaTooltip,
   ],
-  host: { class: 'flex flex-col items-end gap-1.5', 'data-slot': 'user-message' },
+  host: {
+    class: 'nxa-animate-in nxa-slide-in-1 flex flex-col items-end gap-1.5',
+    'data-slot': 'user-message',
+  },
   template: `
     <div data-slot="user-message-attachments" class="flex flex-wrap justify-end gap-2 empty:hidden">
       <nxa-attachment *nxaMessageAttachments />
     </div>
     <div class="flex w-full items-center justify-end gap-1">
       <div nxaActionBarRoot hideWhenRunning autohide="not-last" [class]="actionBar">
-        <button nxaActionBarEdit [class]="button" aria-label="Edit" title="Edit">
+        <button nxaActionBarEdit [class]="button" aria-label="Edit" nxaTooltip="Edit">
           <nxa-icon name="pencil" class="size-3.5" />
         </button>
-        <button nxaActionBarCopy [class]="button" aria-label="Copy" title="Copy">
-          <nxa-icon *nxaMessageIf="{ copied: true }; else copy" name="check" class="size-3.5" />
+        <button nxaActionBarCopy [class]="button" aria-label="Copy" nxaTooltip="Copy">
+          <nxa-icon
+            *nxaMessageIf="{ copied: true }; else copy"
+            name="check"
+            class="nxa-animate-in nxa-zoom-in-50 nxa-duration-200 size-3.5"
+          />
           <ng-template #copy><nxa-icon name="copy" class="size-3.5" /></ng-template>
         </button>
       </div>

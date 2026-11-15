@@ -23,6 +23,7 @@ import {
   injectThreadList,
 } from '@ngx-assistant/angular';
 import { NxaIcon } from '../icons';
+import { NxaTooltip } from '../tooltip/tooltip';
 import { NxaThreadListItems, NxaThreadListSearch } from '../thread-list/thread-list';
 import { UNTITLED_THREAD } from '../thread-list/thread-list-groups';
 import { NxaThread } from '../thread/thread';
@@ -34,7 +35,7 @@ export type AssistantModalView = 'thread' | 'list';
 let nextId = 0;
 
 const HEADER_BUTTON =
-  'flex size-7 items-center justify-center rounded-md text-nxa-muted-foreground outline-none transition-colors hover:bg-nxa-accent hover:text-nxa-foreground focus-visible:ring-2 focus-visible:ring-nxa-ring disabled:pointer-events-none disabled:opacity-40 aria-pressed:bg-nxa-muted aria-pressed:text-nxa-foreground';
+  'flex size-7 items-center justify-center rounded-md text-nxa-muted-foreground outline-none transition-[color,background-color,scale] duration-150 hover:bg-nxa-accent hover:text-nxa-foreground focus-visible:ring-2 focus-visible:ring-nxa-ring disabled:pointer-events-none disabled:opacity-40 aria-pressed:bg-nxa-muted aria-pressed:text-nxa-foreground motion-safe:active:scale-90';
 
 const ICON_SWAP =
   'absolute size-5 transition-[scale,opacity] duration-200 motion-reduce:transition-none';
@@ -70,6 +71,7 @@ const ICON_SWAP =
     NxaThreadListSearch,
     NxaThreadListItems,
     NxaIcon,
+    NxaTooltip,
   ],
   host: { class: 'fixed end-4 bottom-4 z-40 block size-11', 'data-slot': 'assistant-modal' },
   template: `
@@ -79,11 +81,11 @@ const ICON_SWAP =
       #origin="cdkOverlayOrigin"
       data-slot="assistant-modal-button"
       [attr.aria-label]="open() ? 'Close Assistant' : 'Open Assistant'"
-      [attr.title]="open() ? 'Close Assistant' : 'Open Assistant'"
+      [nxaTooltip]="open() ? 'Close Assistant' : 'Open Assistant'"
       [attr.aria-expanded]="open()"
       [attr.aria-controls]="open() ? dialogId : null"
       (click)="toggle()"
-      class="relative flex size-full items-center justify-center rounded-full border border-nxa-border bg-nxa-background text-nxa-foreground shadow-md outline-none transition-[scale] duration-150 hover:bg-nxa-accent focus-visible:ring-2 focus-visible:ring-nxa-ring active:scale-95 motion-reduce:transition-none"
+      class="relative flex size-full items-center justify-center rounded-full border border-nxa-border bg-nxa-background text-nxa-foreground shadow-md outline-none transition-[scale] duration-150 hover:bg-nxa-accent focus-visible:ring-2 focus-visible:ring-nxa-ring motion-safe:active:scale-95 motion-reduce:transition-none"
     >
       <nxa-icon
         name="bot"
@@ -121,7 +123,7 @@ const ICON_SWAP =
         <button
           type="button"
           aria-label="Resize Assistant"
-          title="Resize Assistant"
+          nxaTooltip="Resize Assistant"
           data-slot="assistant-modal-resize-handle"
           (pointerdown)="sizer.pointerDown($event)"
           (pointermove)="sizer.pointerMove($event)"
@@ -149,7 +151,7 @@ const ICON_SWAP =
               type="button"
               data-slot="assistant-modal-threads"
               aria-label="Threads"
-              title="Threads"
+              nxaTooltip="Threads"
               [attr.aria-pressed]="view() === 'list'"
               [disabled]="!hasThreads() && view() === 'thread'"
               (click)="view.set(view() === 'list' ? 'thread' : 'list')"
@@ -161,7 +163,7 @@ const ICON_SWAP =
               nxaThreadListNew
               data-slot="assistant-modal-new"
               aria-label="New Thread"
-              title="New Thread"
+              nxaTooltip="New Thread"
               (click)="view.set('thread')"
               [class]="headerButton"
             >

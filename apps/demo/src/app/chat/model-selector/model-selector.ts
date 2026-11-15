@@ -141,7 +141,7 @@ const TRIGGER_VARIANTS = {
       [class.mt-1.5]="side() === 'bottom'"
       [class.bottom-full]="side() === 'top'"
       [class.mb-1.5]="side() === 'top'"
-      class="absolute start-0 z-50 flex w-72 max-w-[calc(100vw-2rem)] flex-col gap-1 rounded-xl border border-nxa-border bg-nxa-background p-1.5 shadow-lg"
+      class="nxa-animate-in nxa-zoom-in-95 absolute start-0 z-50 flex w-72 max-w-[calc(100vw-2rem)] flex-col gap-1 rounded-xl border border-nxa-border bg-nxa-background p-1.5 shadow-lg"
     >
       @if (isSearchable()) {
         <div class="relative">

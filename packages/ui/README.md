@@ -29,8 +29,9 @@ and the texts are yours. This folder is their source, with their tests and a pre
 | `model-selector/model-selector.ts`   | `<nxa-model-selector>`    | The chosen model and effort, and a panel to pick them; the choice goes to every run.                                    |
 | `tool-ui/approval-card.ts`           | `<nxa-approval-card>`     | A ready approval request for a tool UI of your own: title, command, details, Allow / Deny, then a receipt.              |
 | `menu/menu.ts`                       |                           | The classes and positions of the menus.                                                                                 |
+| `tooltip/tooltip.ts`                 | `[nxaTooltip]`            | The name of an icon button beside it, on hover or keyboard focus.                                                       |
 | `icons.ts`                           | `<nxa-icon>`              | The inline SVG icons.                                                                                                   |
-| `styles/nxa-theme.css`               |                           | The theme tokens, light and dark, and the markdown typography.                                                          |
+| `styles/nxa-theme.css`               |                           | The theme tokens, light and dark, the markdown typography and the entrance motion.                                      |
 
 Every file depends only on `@ngx-assistant/angular` (and its engine, for a few types), Angular,
 `@angular/cdk` (menus and overlay), `markdown-it` and Tailwind.
@@ -262,9 +263,22 @@ Set a token on any element to restyle what is below it, for example
 `<nxa-thread style="--nxa-primary: oklch(0.55 0.2 260)" />`. The width of the conversation is
 `--nxa-thread-max-width` (44rem).
 
+### Motion
+
+Messages, the welcome and its suggestions slide in, menus zoom in, the copy icon turns into a check
+and icon buttons shrink a little when pressed. The entrances are classes of the theme, so they need
+nothing installed: `nxa-animate-in` fades an element in, and `nxa-slide-in-1` / `nxa-slide-in-2`,
+`nxa-zoom-in-50` / `nxa-zoom-in-75` / `nxa-zoom-in-95` and `nxa-duration-200` add a slide, a zoom
+and a longer duration. Set `--nxa-enter-duration` or `--nxa-enter-delay` on an element to change
+its timing. When the system asks for reduced motion nothing moves, and the content shows at once.
+
 ## Accessibility
 
-- Every icon button has an `aria-label`.
+- Every icon button has an `aria-label`, and shows it in a tooltip (`nxaTooltip`) after the pointer
+  rests on it or at once when it gets the keyboard focus, never from a touch. Escape closes the
+  tooltip without closing the assistant modal, and the pointer can move onto it. Screen readers
+  skip a tooltip that repeats the button's name; one with a different text describes the button
+  (`aria-describedby`) while it is open.
 - The actions of a message show on hover and on keyboard focus: they stay in the tab order while
   hidden.
 - The composer takes the focus when the thread appears, when a run starts and after switching

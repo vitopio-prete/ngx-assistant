@@ -13,10 +13,11 @@ import {
   injectThread,
 } from '@ngx-assistant/angular';
 import { NxaIcon } from '../icons';
+import { NxaTooltip } from '../tooltip/tooltip';
 import { NxaAttachment } from './attachment';
 
 const ROUND =
-  'flex size-8 items-center justify-center rounded-full outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-nxa-ring disabled:opacity-40';
+  'flex size-8 items-center justify-center rounded-full outline-none transition-[opacity,background-color,color,scale] duration-150 focus-visible:ring-2 focus-visible:ring-nxa-ring disabled:opacity-40 motion-safe:active:scale-90';
 
 /**
  * The thread composer: attachments picked, pasted or dropped, the message field (Enter sends,
@@ -55,6 +56,7 @@ const ROUND =
     NxaThreadIf,
     NxaAttachment,
     NxaIcon,
+    NxaTooltip,
   ],
   host: { class: 'flex flex-col gap-2', 'data-slot': 'composer' },
   template: `
@@ -90,7 +92,7 @@ const ROUND =
                 round + ' text-nxa-muted-foreground hover:bg-nxa-accent hover:text-nxa-foreground'
               "
               aria-label="Add attachment"
-              title="Add attachment"
+              nxaTooltip="Add attachment"
             >
               <nxa-icon name="paperclip" class="size-4" />
             </button>
@@ -102,7 +104,7 @@ const ROUND =
           nxaComposerSend
           [class]="round + ' bg-nxa-primary text-nxa-primary-foreground'"
           aria-label="Send"
-          title="Send"
+          nxaTooltip="Send"
         >
           <nxa-icon name="arrow-up" class="size-4" />
         </button>
@@ -111,7 +113,7 @@ const ROUND =
           nxaComposerCancel
           [class]="round + ' bg-nxa-primary text-nxa-primary-foreground'"
           aria-label="Stop"
-          title="Stop"
+          nxaTooltip="Stop"
         >
           <nxa-icon name="stop" [filled]="true" class="size-3.5" />
         </button>
