@@ -48,7 +48,7 @@ const ICON_SWAP =
  * button and Escape close it, and the focus goes back to the button. Its top corner on the start
  * side resizes it, with the pointer or the arrow keys; Enter or a double click restore the default
  * size. The size is remembered in `localStorage`. Elements marked `nxaComposerTools` go in the
- * composer of its thread.
+ * composer of its thread, and elements marked `nxaComposerNotice` above its field.
  *
  * @example
  * ```html
@@ -172,6 +172,7 @@ const ICON_SWAP =
         <div data-slot="assistant-modal-body" class="relative min-h-0 flex-1">
           <nxa-thread data-slot="assistant-modal-thread" class="h-full" [inert]="view() === 'list'">
             <ng-content select="[nxaComposerTools]" ngProjectAs="[nxaComposerTools]" />
+            <ng-content select="[nxaComposerNotice]" ngProjectAs="[nxaComposerNotice]" />
           </nxa-thread>
           @if (view() === 'list') {
             <nav

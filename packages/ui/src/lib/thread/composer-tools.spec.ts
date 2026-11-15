@@ -13,6 +13,7 @@ import {
 } from '@ngx-assistant/engine';
 import { NxaAssistantModal } from '../assistant-modal/assistant-modal';
 import { NxaModelSelector } from '../model-selector/model-selector';
+import { axeViolations } from '../../testing/a11y';
 import { stubResizeObserver } from '../../testing/thread-harness';
 import { makeAdapter, slots, until, withTitles } from '../../testing/thread-list-harness';
 import { NxaComposer } from './composer';
@@ -46,10 +47,14 @@ const model: ChatModelAdapter = {
         [models]="models"
         [(value)]="value"
       />
+      @if (notice()) {
+        <p nxaComposerNotice role="status" class="limit">You used today's messages.</p>
+      }
     </nxa-thread>
   `,
 })
 class ThreadHost {
+  readonly notice = signal(false);
   readonly models = MODELS;
   readonly value = signal<string | undefined>(undefined);
   readonly assistant = injectAssistant();
@@ -69,6 +74,7 @@ class BareComposerHost {}
   template: `
     <nxa-assistant-modal>
       <nxa-model-selector nxaComposerTools side="top" [models]="models" [(value)]="value" />
+      <p nxaComposerNotice role="status" class="limit">Sign in for more messages.</p>
     </nxa-assistant-modal>
   `,
 })
@@ -85,11 +91,68 @@ async function mount<T>(component: new () => T) {
   return fixture;
 }
 
+/** Whether CSS `:empty` matches: comments, such as the anchor of an `@if`, do not count. */
+const cssEmpty = (node: Node) =>
+  [...node.childNodes].every((child) => child.nodeType === Node.COMMENT_NODE);
+
 beforeAll(stubResizeObserver);
 
 afterEach(() => {
   contexts.length = 0;
   document.body.replaceChildren();
+});
+
+describe('the nxaComposerNotice slot', () => {
+  it('puts a notice given to the thread above the composer field, and empties it when it goes', async () => {
+    const fixture = await mount(ThreadHost);
+    const root = fixture.nativeElement as HTMLElement;
+    const notice = () => slots(root, 'composer-notice')[0]!;
+    expect(cssEmpty(notice())).toBe(true);
+    expect(notice().className).toContain('empty:hidden');
+
+    fixture.componentInstance.notice.set(true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const composer = slots(root, 'composer')[0]!;
+    expect(notice().querySelector('.limit')!.textContent).toBe("You used today's messages.");
+    expect(composer.firstElementChild).toBe(notice());
+    expect(notice().compareDocumentPosition(composer.querySelector('form')!)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    // Not in the tools row.
+    expect(slots(root, 'composer-tools')[0]!.querySelector('.limit')).toBeNull();
+    expect(await axeViolations(root)).toEqual([]);
+
+    fixture.componentInstance.notice.set(false);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(cssEmpty(notice())).toBe(true);
+  });
+
+  it('keeps the bare composer without a notice', async () => {
+    const fixture = await mount(BareComposerHost);
+    const notice = slots(fixture.nativeElement as HTMLElement, 'composer-notice')[0]!;
+    expect(cssEmpty(notice)).toBe(true);
+  });
+
+  it('goes through the assistant modal to the composer of its thread', async () => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideRemoteThreadListRuntime({
+          adapter: makeAdapter(withTitles()),
+          runtime: () => provideLocalRuntime(model),
+        }),
+      ],
+    });
+    const fixture = await mount(ModalHost);
+    document.body.querySelector<HTMLButtonElement>('[data-slot="assistant-modal-button"]')!.click();
+    await until(fixture, () =>
+      expect(document.body.querySelector('[data-slot="composer-notice"] .limit')).not.toBeNull(),
+    );
+    expect(document.body.querySelector('[data-slot="composer-notice"] .limit')!.textContent).toBe(
+      'Sign in for more messages.',
+    );
+  });
 });
 
 describe('the nxaComposerTools slot', () => {

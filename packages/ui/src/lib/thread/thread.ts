@@ -23,7 +23,8 @@ import { NxaUserMessage } from './user-message';
  * viewport that follows the reply as it streams, a button back to the bottom, and the composer.
  *
  * Fill a container with a height: the thread takes all of it and scrolls inside. Elements marked
- * `nxaComposerTools` go in the composer, after the attachment button.
+ * `nxaComposerTools` go in the composer, after the attachment button, and elements marked
+ * `nxaComposerNotice` above the composer field (a usage limit, a hint to sign in).
  *
  * @example
  * ```html
@@ -101,6 +102,7 @@ import { NxaUserMessage } from './user-message';
             </button>
             <nxa-composer class="w-full" [autoFocus]="autoFocus()">
               <ng-content select="[nxaComposerTools]" ngProjectAs="[nxaComposerTools]" />
+              <ng-content select="[nxaComposerNotice]" ngProjectAs="[nxaComposerNotice]" />
             </nxa-composer>
           </div>
         </div>
