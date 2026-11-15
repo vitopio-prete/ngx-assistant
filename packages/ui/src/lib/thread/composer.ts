@@ -69,7 +69,7 @@ const ROUND =
     <form
       nxaComposerRoot
       nxaComposerAttachmentDropzone
-      class="flex w-full cursor-text flex-col gap-2 rounded-2xl border border-nxa-border bg-nxa-background p-2 shadow-sm transition-colors focus-within:border-nxa-ring data-[nxa-dragging]:border-dashed data-[nxa-dragging]:border-nxa-ring data-[nxa-dragging]:bg-nxa-accent"
+      class="flex w-full cursor-text flex-col gap-2 rounded-2xl border border-[color-mix(in_oklab,var(--nxa-foreground)_10%,transparent)] bg-[color-mix(in_oklab,var(--nxa-muted)_30%,var(--nxa-background))] p-2 transition-colors focus-within:border-nxa-ring data-[nxa-dragging]:border-dashed data-[nxa-dragging]:border-nxa-ring data-[nxa-dragging]:bg-nxa-accent"
     >
       <div data-slot="composer-attachments" class="flex flex-wrap gap-2 px-1 pt-1 empty:hidden">
         <nxa-attachment *nxaComposerAttachments removable />
