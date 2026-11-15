@@ -11,6 +11,7 @@
     "test:schematics": "pnpm run build:schematics && vitest run --config packages/angular/schematics/vitest.config.mts",
     "e2e": "pnpm --filter @ngx-assistant/demo e2e",
     "check:demo-ui": "node scripts/check-demo-ui.mjs",
+    "check:packages": "node scripts/check-packages.mjs",
     "sync:demo-ui": "node scripts/check-demo-ui.mjs --write",
     "typecheck": "pnpm --filter @ngx-assistant/engine typecheck && tsc -p packages/angular/schematics/tsconfig.spec.json",
     "smoke": "pnpm --filter @ngx-assistant/engine smoke",
@@ -38,6 +39,7 @@
     "@angular/cdk": "^22.2.5",
     "@angular/cli": "^22.2.4",
     "@angular/compiler-cli": "^22.2.0",
+    "@arethetypeswrong/cli": "^0.18.5",
     "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.4",
     "@commitlint/types": "^21.2.3",
@@ -53,6 +55,7 @@
     "markdown-it": "^15.0.3",
     "ng-packagr": "^22.2.0",
     "prettier": "^3.8.1",
+    "publint": "^0.3.25",
     "typescript": "~6.0.2",
     "typescript-eslint": "8.71.0",
     "vitest": "^5.0.0"
