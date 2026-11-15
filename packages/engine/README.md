@@ -10,6 +10,17 @@ dependency on React or Angular. Framework bindings import everything from the pa
 import { AssistantRuntimeImpl, LocalRuntimeCore } from '@ngx-assistant/engine';
 ```
 
+## Installation
+
+In an Angular app, `ng add @ngx-assistant/angular` installs the engine at the version the Angular
+package expects. On its own:
+
+```bash
+npm install @ngx-assistant/engine
+```
+
+The package is an ES module only.
+
 ## `process.env.NODE_ENV`
 
 The engine reads `process.env.NODE_ENV` to enable development-only checks, and expects the

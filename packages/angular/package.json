@@ -2,16 +2,37 @@
   "name": "@ngx-assistant/angular",
   "version": "0.0.0",
   "description": "Angular signals bindings and headless primitives for ngx-assistant",
+  "keywords": [
+    "angular",
+    "signals",
+    "ai",
+    "chat",
+    "assistant",
+    "llm",
+    "streaming",
+    "headless",
+    "components",
+    "schematics",
+    "ngx-assistant"
+  ],
   "license": "MIT",
+  "author": {
+    "name": "vitopio-prete",
+    "url": "https://github.com/vitopio-prete"
+  },
+  "homepage": "https://github.com/vitopio-prete/ngx-assistant/tree/main/packages/angular#readme",
+  "bugs": {
+    "url": "https://github.com/vitopio-prete/ngx-assistant/issues"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/vitopio-prete/ngx-assistant.git",
+    "url": "git+https://github.com/vitopio-prete/ngx-assistant.git",
     "directory": "packages/angular"
   },
   "peerDependencies": {
     "@angular/common": "^22.2.0",
     "@angular/core": "^22.2.0",
-    "@ngx-assistant/engine": "0.0.0"
+    "@ngx-assistant/engine": "^0.0.0"
   },
   "dependencies": {
     "assistant-stream": "^0.3.53",
@@ -24,5 +45,9 @@
   "schematics": "./schematics/collection.json",
   "ng-add": {
     "save": "dependencies"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

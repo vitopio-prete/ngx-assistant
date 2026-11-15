@@ -2,10 +2,30 @@
   "name": "@ngx-assistant/engine",
   "version": "0.0.0",
   "description": "Framework-agnostic chat runtime for ngx-assistant",
+  "keywords": [
+    "ai",
+    "chat",
+    "assistant",
+    "llm",
+    "streaming",
+    "runtime",
+    "tools",
+    "framework-agnostic",
+    "typescript",
+    "ngx-assistant"
+  ],
   "license": "MIT",
+  "author": {
+    "name": "vitopio-prete",
+    "url": "https://github.com/vitopio-prete"
+  },
+  "homepage": "https://github.com/vitopio-prete/ngx-assistant/tree/main/packages/engine#readme",
+  "bugs": {
+    "url": "https://github.com/vitopio-prete/ngx-assistant/issues"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/vitopio-prete/ngx-assistant.git",
+    "url": "git+https://github.com/vitopio-prete/ngx-assistant.git",
     "directory": "packages/engine"
   },
   "type": "module",
@@ -26,6 +46,10 @@
     "NOTICE",
     "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "build": "tsc -p tsconfig.lib.json && tsc-alias -p tsconfig.lib.json --resolve-full-paths",
     "test": "vitest run",

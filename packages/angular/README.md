@@ -1,7 +1,7 @@
 # @ngx-assistant/angular
 
 Angular bindings (signals + dependency injection) and headless primitives for
-[`@ngx-assistant/engine`](../engine).
+[`@ngx-assistant/engine`](https://github.com/vitopio-prete/ngx-assistant/tree/main/packages/engine).
 
 ```ts
 import { ChangeDetectionStrategy, Component } from '@angular/core';

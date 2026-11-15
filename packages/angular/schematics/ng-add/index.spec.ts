@@ -1,6 +1,15 @@
 import type { SchematicTestRunner, UnitTestTree } from '@angular-devkit/schematics/testing';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp, createRunner } from '../testing/workspace';
+
+// The range the library declares for the engine, which release-please bumps on every release.
+const engineRange = (
+  JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf8')) as {
+    peerDependencies: Record<string, string>;
+  }
+).peerDependencies['@ngx-assistant/engine'];
 
 const root = 'projects/app';
 const config = `${root}/src/app/app.config.ts`;
@@ -35,7 +44,7 @@ describe('ng add', () => {
 
   it('adds the engine at the range the library expects', async () => {
     const tree = await ngAdd();
-    expect(packageJson(tree).dependencies['@ngx-assistant/engine']).toBe('0.0.0');
+    expect(packageJson(tree).dependencies['@ngx-assistant/engine']).toBe(engineRange);
   });
 
   it('keeps an engine version the app already has', async () => {
