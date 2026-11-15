@@ -44,6 +44,7 @@ const model: ChatModelAdapter = {
       [(effort)]="effort"
       [side]="side()"
       [variant]="variant()"
+      [keepDisabled]="keepDisabled()"
     />
     <button class="outside">Outside</button>
   `,
@@ -54,6 +55,7 @@ class Host {
   readonly value = signal<string | undefined>(undefined);
   readonly effort = signal<string | undefined>(undefined);
   readonly side = signal<'top' | 'bottom'>('bottom');
+  readonly keepDisabled = signal(false);
   readonly assistant = injectAssistant();
 }
 
@@ -196,6 +198,20 @@ describe('nxa-model-selector', () => {
     await until(fixture, () => expect(item('Plain').hasAttribute('data-highlighted')).toBe(true));
     keydown(trigger(), 'Enter');
     await until(fixture, () => expect(fixture.componentInstance.value()).toBe('plain'));
+  });
+
+  it('shows the first enabled model while the chosen one is locked, unless keepDisabled', async () => {
+    await mount((host) => {
+      host.models.set(WITH_ICONS);
+      host.value.set('pro');
+    });
+    expect(trigger().textContent).toContain('Small');
+    expect(fixture.componentInstance.value()).toBe('pro');
+
+    fixture.componentInstance.keepDisabled.set(true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(trigger().textContent).toContain('Pro');
   });
 
   it('is a compact button without a background in the ghost variant', async () => {
