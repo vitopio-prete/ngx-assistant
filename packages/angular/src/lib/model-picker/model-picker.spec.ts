@@ -46,6 +46,7 @@ const PARTS = [
         [(value)]="value"
         [(effort)]="effort"
         [(open)]="open"
+        [keepDisabled]="keepDisabled()"
       >
         <button nxaModelPickerTrigger class="trigger">
           {{ picker.selectedModel()?.name ?? 'Select model' }}
@@ -78,6 +79,7 @@ class PickerHost {
   readonly value = signal<string | undefined>(undefined);
   readonly effort = signal<string | undefined>(undefined);
   readonly open = signal(false);
+  readonly keepDisabled = signal(false);
 }
 
 /** A model that records the model context of each run. */
@@ -544,10 +546,105 @@ describe('nxaModelPicker and the model context', () => {
     expect((await send('one')).config).toBeUndefined();
   });
 
-  it('sends a value that is not in the list as it is, with no selected model', async () => {
+  it('falls back to the first enabled model when the value is not in the list', async () => {
     await setup((host) => host.value.set('elsewhere'));
 
-    expect((await send('one')).config).toEqual({ modelName: 'elsewhere' });
+    expect((await send('one')).config).toEqual({ modelName: 'small' });
+    expect(el('.trigger').textContent!.trim()).toBe('Small');
+    expect(fixture.componentInstance.value()).toBe('elsewhere');
+  });
+
+  it('falls back from a model that becomes disabled and comes back when it is enabled', async () => {
+    const host = (await setup((h) => h.value.set('large')), fixture.componentInstance);
+    expect((await send('one')).config).toEqual({ modelName: 'large' });
+
+    const locked = MODELS.map((m) => (m.id === 'large' ? { ...m, disabled: true } : m));
+    host.models.set(locked);
+    await render();
+    expect(el('.trigger').textContent!.trim()).toBe('Small');
+    expect(all('.item').map((i) => i.getAttribute('aria-selected'))).toEqual([
+      'true',
+      'false',
+      'false',
+      'false',
+    ]);
+    expect((await send('two')).config).toEqual({ modelName: 'small' });
+    // The choice is kept, not rewritten.
+    expect(host.value()).toBe('large');
+
+    host.models.set(MODELS);
+    await render();
+    expect(el('.trigger').textContent!.trim()).toBe('Large');
+    expect((await send('three')).config).toEqual({ modelName: 'large' });
+  });
+
+  it('applies the effort of the model it falls back to', async () => {
+    await setup((host) => {
+      host.models.set([
+        { id: 'locked', name: 'Locked', disabled: true, efforts: true },
+        { id: 'open', name: 'Open', efforts: [{ id: 'max', name: 'Max' }] },
+      ]);
+      host.value.set('locked');
+      host.effort.set('high');
+    });
+    expect((await send('one')).config).toEqual({ modelName: 'open' });
+
+    fixture.componentInstance.effort.set('max');
+    await render();
+    expect((await send('two')).config).toEqual({ modelName: 'open', reasoningEffort: 'max' });
+  });
+
+  it('falls back once the list arrives, and keeps the choice for when it is in it', async () => {
+    const host =
+      (await setup((h) => {
+        h.models.set([]);
+        h.value.set('large');
+      }),
+      fixture.componentInstance);
+    expect((await send('one')).config).toBeUndefined();
+
+    host.models.set(MODELS);
+    await render();
+    expect((await send('two')).config).toEqual({ modelName: 'large' });
+  });
+
+  it('keeps the value when no model can be picked and the value is in the list', async () => {
+    const locked = MODELS.map((m) => ({ ...m, disabled: true }));
+    await setup((host) => {
+      host.models.set(locked);
+      host.value.set('large');
+    });
+    expect((await send('one')).config).toEqual({ modelName: 'large' });
+
+    fixture.componentInstance.value.set('elsewhere');
+    await render();
+    expect((await send('two')).config).toEqual({ modelName: 'small' });
+  });
+
+  it('opens on the model shown in place of a locked value, and Enter makes it the value', async () => {
+    await setup((host) => host.value.set('medium'));
+    const trigger = el('.trigger');
+    trigger.focus();
+    await press(trigger, 'ArrowDown');
+    expect(highlighted()?.textContent!.trim()).toBe('Small');
+    expect(trigger.getAttribute('aria-activedescendant')).toBe(highlighted()!.id);
+    expect(fixture.componentInstance.value()).toBe('medium');
+
+    await press(trigger, 'Enter');
+    expect(fixture.componentInstance.value()).toBe('small');
+  });
+
+  it('keeps a disabled or unknown value with keepDisabled', async () => {
+    await setup((host) => {
+      host.keepDisabled.set(true);
+      host.value.set('medium');
+    });
+    expect(el('.trigger').textContent!.trim()).toBe('Medium');
+    expect((await send('one')).config).toEqual({ modelName: 'medium' });
+
+    fixture.componentInstance.value.set('elsewhere');
+    await render();
+    expect((await send('two')).config).toEqual({ modelName: 'elsewhere' });
     expect(el('.trigger').textContent!.trim()).toBe('Select model');
   });
 

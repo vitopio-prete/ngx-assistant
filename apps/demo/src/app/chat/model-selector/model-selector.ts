@@ -66,7 +66,9 @@ const TRIGGER_VARIANTS = {
  * goes in the model context of the nearest runtime, so every run asks for that model.
  *
  * - `models`: the models to pick from (`ModelOption[]`).
- * - `value` (two-way): the id of the chosen model; when unset, the first enabled model.
+ * - `value` (two-way): the id of the chosen model; when unset, the first enabled model. A value
+ *   that cannot be used (a disabled model, or one not in `models`) shows the first enabled model
+ *   instead, and comes back when that model is enabled again; `keepDisabled` keeps it.
  * - `effort` (two-way): the chosen effort level.
  * - `open` (two-way): whether the panel is shown.
  * - `side`: whether the panel opens below the button (default) or above it, as in a composer at
@@ -107,7 +109,7 @@ const TRIGGER_VARIANTS = {
   hostDirectives: [
     {
       directive: NxaModelPickerDirective,
-      inputs: ['models', 'value', 'effort', 'open'],
+      inputs: ['models', 'value', 'effort', 'open', 'keepDisabled'],
       outputs: ['valueChange', 'effortChange', 'openChange'],
     },
   ],

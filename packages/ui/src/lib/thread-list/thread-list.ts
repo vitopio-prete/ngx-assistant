@@ -196,12 +196,22 @@ export class NxaThreadListArchived {
  * threads at the end. It needs a runtime with a thread list, such as
  * `provideRemoteThreadListRuntime(...)` or an external store with a thread list adapter.
  *
+ * Elements marked `nxaThreadListHeader` go above the "New Thread" button (the name of the app),
+ * and elements marked `nxaThreadListFooter` at the end (an account row, a "Sign in" button), both
+ * outside the navigation of the threads. With a height, as in a full-height sidebar, the footer
+ * sits at the bottom, and stays in view while the sidebar scrolls.
+ *
  * The parts are components of their own (`nxa-thread-list-search`, `nxa-thread-list-items`,
  * `nxa-thread-list-item`, `nxa-thread-list-archived`) to build a different list from.
  *
  * @example
  * ```html
  * <aside class="w-64 p-2"><nxa-thread-list /></aside>
+ * <aside class="flex h-dvh w-64 flex-col overflow-y-auto p-2">
+ *   <nxa-thread-list class="flex-1">
+ *     <button nxaThreadListFooter type="button" (click)="signIn()">Sign in</button>
+ *   </nxa-thread-list>
+ * </aside>
  * ```
  */
 @Component({
@@ -215,13 +225,19 @@ export class NxaThreadListArchived {
     NxaThreadListArchived,
     NxaIcon,
   ],
-  host: { class: 'block text-nxa-foreground' },
+  host: { class: 'flex flex-col text-nxa-foreground' },
   template: `
+    <div
+      data-slot="thread-list-header"
+      class="mb-2 flex flex-col gap-0.5 border-b border-nxa-border pb-2 empty:hidden"
+    >
+      <ng-content select="[nxaThreadListHeader]" />
+    </div>
     <nav
       nxaThreadListRoot
       aria-label="Threads"
       data-slot="thread-list"
-      class="flex flex-col gap-0.5"
+      class="flex flex-1 flex-col gap-0.5"
     >
       <button nxaThreadListNew data-slot="thread-list-new" [class]="newButton">
         <nxa-icon name="plus" class="size-4" />
@@ -233,6 +249,12 @@ export class NxaThreadListArchived {
       <nxa-thread-list-items [query]="hasThreads() ? search() : ''" />
       <nxa-thread-list-archived />
     </nav>
+    <div
+      data-slot="thread-list-footer"
+      class="sticky bottom-0 mt-2 flex flex-col gap-0.5 border-t border-nxa-border bg-nxa-background pt-2 empty:hidden"
+    >
+      <ng-content select="[nxaThreadListFooter]" />
+    </div>
   `,
 })
 export class NxaThreadList {

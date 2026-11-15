@@ -27,10 +27,17 @@ const ROUND =
  * Elements marked `nxaComposerTools` go in the row under the field, after the attachment button:
  * a model selector, or any other control.
  *
+ * Elements marked `nxaComposerNotice` go above the field: a usage limit, a quota, a hint to sign in.
+ * What they say and whether they are a `role="status"` or an `alert` is up to the app; the composer
+ * still sends (a server that refuses the run gives the message its error).
+ *
  * @example
  * ```html
  * <nxa-composer>
  *   <nxa-model-selector nxaComposerTools variant="ghost" side="top" [models]="models" />
+ *   @if (limitReached()) {
+ *     <p nxaComposerNotice role="status">You used today's messages. Sign in for more.</p>
+ *   }
  * </nxa-composer>
  * ```
  */
@@ -51,6 +58,9 @@ const ROUND =
   ],
   host: { class: 'flex flex-col gap-2', 'data-slot': 'composer' },
   template: `
+    <div data-slot="composer-notice" class="flex flex-col gap-2 empty:hidden">
+      <ng-content select="[nxaComposerNotice]" />
+    </div>
     @if (rejected(); as message) {
       <p role="alert" class="px-2 text-sm text-nxa-destructive">{{ message }}</p>
     }

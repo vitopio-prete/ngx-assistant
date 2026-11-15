@@ -134,6 +134,97 @@ in the composer, after the attachment button:
 </nxa-thread>
 ```
 
+`nxa-composer`, `nxa-thread` and `nxa-assistant-modal` put the elements marked `nxaComposerNotice`
+above the composer field, and `nxa-thread-list` puts the elements marked `nxaThreadListHeader`
+above its New Thread button and those marked `nxaThreadListFooter` at its end, outside the
+navigation of the threads. Empty, they take no space. Give the list a height (`class="flex-1"` in
+a column, or `min-h-full`) and the footer sits at the bottom of the sidebar, in view while it
+scrolls.
+
+### Models that need sign in
+
+The components do no authentication: your app has its own (a backend session, an identity
+provider, a key the visitor brings) and shows its state through them. A signal of the app that
+says whether the user is signed in is enough:
+
+```ts
+@Component({
+  imports: [NxaThread, NxaThreadList, NxaModelSelector],
+  providers: [
+    provideRemoteThreadListRuntime({
+      adapter: threads,
+      runtime: () =>
+        provideDataStreamRuntime(() => {
+          const auth = inject(AuthService);
+          return {
+            api: '/api/chat',
+            // The server checks the model of each run against the session.
+            headers: async (): Promise<Record<string, string>> => {
+              const token = await auth.token();
+              return token ? { Authorization: `Bearer ${token}` } : {};
+            },
+          };
+        }),
+    }),
+  ],
+  template: `
+    <div class="flex h-dvh">
+      <aside class="flex w-64 flex-col overflow-y-auto p-2">
+        <nxa-thread-list class="flex-1">
+          @if (auth.user(); as user) {
+            <button nxaThreadListFooter type="button" (click)="auth.signOut()">
+              {{ user.name }} · Sign out
+            </button>
+          } @else {
+            <button nxaThreadListFooter type="button" (click)="auth.signIn()">Sign in</button>
+          }
+        </nxa-thread-list>
+      </aside>
+      <nxa-thread class="flex-1">
+        <nxa-model-selector
+          nxaComposerTools
+          variant="ghost"
+          side="top"
+          [models]="models()"
+          [(value)]="model"
+        />
+        @if (limit(); as message) {
+          <p nxaComposerNotice role="status">{{ message }}</p>
+        }
+      </nxa-thread>
+    </div>
+  `,
+})
+export class Chat {
+  protected readonly auth = inject(AuthService);
+  protected readonly model = signal<string | undefined>(localStorage.getItem('model') ?? undefined);
+  protected readonly models = computed(() =>
+    ALL_MODELS.map((m) =>
+      m.signInRequired && !this.auth.user()
+        ? { ...m, disabled: true, description: 'Sign in to use' }
+        : m,
+    ),
+  );
+  /** Set by the app, from its usage endpoint or from the error of a refused run. */
+  protected readonly limit = signal('');
+}
+```
+
+- **Locked models.** A model with `disabled: true` stays in the list with its `description` as the
+  reason, and cannot be picked. When the chosen model becomes disabled (the user signs out) or is
+  not in the list (the list is still loading), the selector shows and sends the first enabled model
+  instead, without rewriting `value`: a choice saved by the app comes back once the user signs in
+  again. `keepDisabled` turns this off.
+- **The account row.** Whatever the app puts in `nxaThreadListFooter`: a "Sign in" button, an
+  avatar with a menu, a link to the settings.
+- **Limits.** The server decides them and refuses a run past them, for instance with a 429 and a
+  message: the message of the reply then shows it as its error. To warn before the user writes, put
+  a notice in `nxaComposerNotice`; the composer still sends, so an app that must stop new messages
+  removes the composer or keeps its server refusing them.
+- **The server checks everything again.** A locked model in the browser is a hint for the user;
+  the backend sees `modelName` in the request body and must check it against the session, falling
+  back or refusing as it sees fit.
+
 The menus and the modal open in the overlay of `@angular/cdk`, at the end of the body: the theme
 imports its stylesheet. They follow the tokens set on the root, not those set on an element, and
 turn dark only with the `dark` class or `data-theme="dark"` on the root.

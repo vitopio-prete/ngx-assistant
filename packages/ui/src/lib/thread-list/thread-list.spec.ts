@@ -1,4 +1,9 @@
-import { EnvironmentInjector, runInInjectionContext } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  EnvironmentInjector,
+  runInInjectionContext,
+} from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { injectAssistant } from '@ngx-assistant/angular';
 import type { RemoteThreadListAdapter, RemoteThreadMetadata } from '@ngx-assistant/engine';
@@ -15,6 +20,19 @@ import {
 } from '../../testing/thread-list-harness';
 import { groupThreads } from './thread-list-groups';
 import { NxaThreadList } from './thread-list';
+
+@Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [NxaThreadList],
+  template: `
+    <nxa-thread-list>
+      <span nxaThreadListHeader class="brand">Acme Chat</span>
+      <button nxaThreadListFooter type="button" class="account">Sign in</button>
+      <p class="stray">Not projected</p>
+    </nxa-thread-list>
+  `,
+})
+class ThreadListWithSlots {}
 
 const mountThreadList = (adapter: RemoteThreadListAdapter) =>
   mountWithThreads(adapter, NxaThreadList);
@@ -412,6 +430,37 @@ describe('nxa-thread-list', () => {
     await until(fixture, () => expect(labels(el)).toEqual(['Today']));
     expect(slots(el, 'thread-list-item')[0]).toBe(row);
     expect(slots(el, 'thread-list-item-rename')).toHaveLength(1);
+  });
+
+  it('puts the header and footer slots around the threads, outside their navigation', async () => {
+    const { fixture, el } = await mountWithThreads(
+      makeAdapter(withTitles('Trip planning')),
+      ThreadListWithSlots,
+    );
+    await until(fixture, () => expect(titles(el)).toEqual(['Trip planning']));
+
+    const [header] = slots(el, 'thread-list-header');
+    const [footer] = slots(el, 'thread-list-footer');
+    const nav = el.querySelector('nav')!;
+    expect(header!.querySelector('.brand')!.textContent).toBe('Acme Chat');
+    expect(footer!.querySelector('.account')!.textContent).toBe('Sign in');
+    expect(nav.contains(header!) || nav.contains(footer!)).toBe(false);
+    const order = [...el.querySelector('nxa-thread-list')!.children].map((child) =>
+      child.getAttribute('data-slot'),
+    );
+    expect(order).toEqual(['thread-list-header', 'thread-list', 'thread-list-footer']);
+    expect(el.querySelector('.stray')).toBeNull();
+    expect(await axeViolations(el)).toEqual([]);
+  });
+
+  it('leaves the header and footer empty, so they are hidden, without slotted content', async () => {
+    const { fixture, el } = await mountThreadList(makeAdapter(withTitles('Trip planning')));
+    await until(fixture, () => expect(titles(el)).toHaveLength(1));
+    for (const name of ['thread-list-header', 'thread-list-footer']) {
+      const [slot] = slots(el, name);
+      expect(slot!.childNodes).toHaveLength(0);
+      expect(slot!.className).toContain('empty:hidden');
+    }
   });
 
   it('has no axe violations, with and without the menu open', async () => {

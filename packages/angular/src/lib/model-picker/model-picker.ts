@@ -1,5 +1,6 @@
 import {
   DestroyRef,
+  booleanAttribute,
   Directive,
   ElementRef,
   Injector,
@@ -39,7 +40,11 @@ const NO_CONTEXT = () => ({});
  * leaving it, or Escape inside it closes it.
  *
  * - `models`: the models to pick from.
- * - `value` (two-way): the id of the chosen model; when unset, the first enabled model.
+ * - `value` (two-way): the id of the chosen model; when unset, the first enabled model. A value
+ *   that cannot be used (a disabled model, or one not in `models`) gives way to the first enabled
+ *   model, without being rewritten: when that model is enabled again, as after signing in, it is
+ *   the chosen one again. Picking a model, even the one shown in its place, replaces `value`.
+ * - `keepDisabled`: keeps a `value` that cannot be used as the chosen model instead.
  * - `effort` (two-way): the chosen effort. It stays across model switches; `activeEffort()` is the
  *   one that applies to the chosen model.
  * - `open` (two-way): whether the content is shown.
@@ -78,6 +83,8 @@ export class NxaModelPicker {
   readonly value = model<string | undefined>(undefined);
   readonly effort = model<string | undefined>(undefined);
   readonly open = model(false);
+  /** Keeps a `value` that is disabled or not in `models` as the chosen model. */
+  readonly keepDisabled = input(false, { transform: booleanAttribute });
 
   /** The base of the ids of the list and of its options. */
   readonly id = `nxa-model-picker-${nextPickerId++}`;
@@ -93,12 +100,20 @@ export class NxaModelPicker {
   private readonly highlighted = signal<string | undefined>(undefined);
 
   /**
-   * The id of the chosen model: `value`, or when unset the first model that can be picked (the
-   * first model if none can).
+   * The id of the chosen model: `value` when it can be picked (or with `keepDisabled`), else the
+   * first model that can be picked (the first model if none can).
    */
   readonly selectedId = computed(() => {
     const models = this.models();
-    return this.value() ?? (models.find((m) => !m.disabled) ?? models[0])?.id;
+    const value = this.value();
+    if (value !== undefined) {
+      if (this.keepDisabled()) return value;
+      if (models.some((m) => m.id === value && !m.disabled)) return value;
+    }
+    const enabled = models.find((m) => !m.disabled);
+    if (enabled) return enabled.id;
+    // Nothing can be picked: the value stays if it is in the list.
+    return models.some((m) => m.id === value) ? value : models[0]?.id;
   });
   readonly selectedModel = computed(() => this.models().find((m) => m.id === this.selectedId()));
   /** The effort levels of the chosen model, or `undefined` when they are not configurable. */
