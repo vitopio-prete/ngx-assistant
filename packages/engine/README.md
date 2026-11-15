@@ -36,3 +36,7 @@ production. With the Angular CLI, `ng add @ngx-assistant/angular` adds the `defi
 
 Without the replacement the engine still loads: in a browser, where `process` does not exist, it
 runs as in production and the checks stay off. In Node it reads the variable of the process.
+
+## Changelog
+
+See [`CHANGELOG.md`](https://github.com/vitopio-prete/ngx-assistant/blob/main/packages/engine/CHANGELOG.md).

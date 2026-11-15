@@ -1115,3 +1115,7 @@ The schematics live in `schematics/` and are compiled on their own (CommonJS, as
 loads them). Their build bundles the styled components of `packages/ui/src/lib`;
 `schematics/ui/components.json` says which entry files each generator starts from, and the build
 adds every file they import.
+
+## Changelog
+
+See [`CHANGELOG.md`](https://github.com/vitopio-prete/ngx-assistant/blob/main/packages/angular/CHANGELOG.md).
