@@ -236,6 +236,12 @@ const button = (root, label) =>
   );
 const welcome = () => $('[data-slot="thread-welcome"]');
 const suggestions = () => $$('[nxaSuggestionTrigger]');
+const threadFooter = () => $('[data-slot="thread-viewport-footer"]');
+/** The new conversation layout: the composer in the middle, the suggestions below it. */
+const isCentered = () =>
+  !threadFooter().classList.contains('sticky') &&
+  suggestions().length > 0 &&
+  Boolean(composerForm().compareDocumentPosition(suggestions()[0]) & 4);
 const composerForm = () => $('form[nxaComposerRoot]');
 const attachmentName = (attachment) => text(attachment.querySelector('.min-w-0 > span'));
 
@@ -387,6 +393,11 @@ await check('the app mounts on a new conversation, with suggestions', async () =
     suggestions().map((s) => text(s.querySelector('[nxaSuggestionTitle]'))),
     ['Say hello', 'Check the weather', 'Send an email', 'Show an error'],
   );
+  assert.ok(isCentered(), 'the composer is in the middle, with the suggestions below it');
+  type('draft');
+  await waitFor(() => suggestions().length === 0, 'the suggestions to hide while typing');
+  type('');
+  await waitFor(() => suggestions().length === 4, 'the suggestions to come back');
   assert.equal(modelTrigger().getAttribute('aria-label'), 'Model: Echo');
   assert.equal(sendButton().disabled, true);
   assert.equal(isRunning(), false);
@@ -403,6 +414,7 @@ await check('the first message saves the conversation, which the backend names',
     { role: 'assistant', text: 'Echo: Hello there!' },
   ]);
   assert.equal(welcome(), null);
+  assert.ok(threadFooter().classList.contains('sticky'), 'the composer moved to the bottom');
   await waitFor(() => threadTitles()[0] === 'Hello there!', 'the generated title');
   assert.equal(activeTitle(), 'Hello there!');
 
@@ -644,6 +656,7 @@ await check(
 
     newThread().click();
     await waitFor(() => welcome(), 'the new conversation again');
+    await waitFor(isCentered, 'the composer back in the middle');
   },
 );
 
