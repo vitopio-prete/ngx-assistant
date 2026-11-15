@@ -8,15 +8,26 @@ const MARKDOWN = `Here is what the **styled thread** renders:
 - [links](https://angular.dev) that open in a new tab
 - raw HTML such as <b>this</b> shown as text
 
+### Code
+
 \`\`\`ts
 const answer = 42;
+console.log(\`The answer is \${answer}\`);
 \`\`\`
 
-| Part | Component |
-| --- | --- |
-| text | nxa-markdown-text |
-| reasoning | nxa-reasoning |
-| tool call | nxa-tool-fallback |
+1. Install the packages:
+   \`\`\`sh
+   pnpm add @ngx-assistant/angular
+   \`\`\`
+2. Add the thread to a component.
+
+### Table
+
+| Part | Component | Since |
+| --- | :---: | ---: |
+| text | nxa-markdown-text | 0.1 |
+| reasoning | nxa-reasoning | 0.1 |
+| tool call | nxa-tool-fallback | 0.1 |
 
 > Try \`/reasoning\`, \`/tool\`, \`/approval\`, \`/approval-card\`, \`/question\` or \`/error\`.`;
 
