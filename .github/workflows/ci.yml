@@ -76,6 +76,9 @@ jobs:
       - name: Engine loads as plain Node ESM
         run: pnpm run smoke
 
+      - name: Pack and check the packages (files, publint, are-the-types-wrong)
+        run: pnpm run check:packages "$RUNNER_TEMP/packages"
+
       - name: Demo end-to-end (send, streaming, stop)
         run: pnpm run e2e
 

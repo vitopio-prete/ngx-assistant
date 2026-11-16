@@ -1,0 +1,39 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/v17.11.2/schemas/config.json",
+  "release-type": "node",
+  "initial-version": "0.1.0",
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": false,
+  "include-component-in-tag": true,
+  "include-v-in-tag": true,
+  "separate-pull-requests": false,
+  "group-pull-request-title-pattern": "chore(release): publish new versions on ${branch}",
+  "pull-request-header": "Merging this pull request tags the release and publishes the packages to npm.",
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "perf", "section": "Performance Improvements" },
+    { "type": "revert", "section": "Reverts" },
+    { "type": "docs", "section": "Documentation", "hidden": true },
+    { "type": "refactor", "section": "Code Refactoring", "hidden": true },
+    { "type": "test", "section": "Tests", "hidden": true },
+    { "type": "build", "section": "Build System", "hidden": true },
+    { "type": "ci", "section": "Continuous Integration", "hidden": true },
+    { "type": "chore", "section": "Miscellaneous Chores", "hidden": true }
+  ],
+  "packages": {
+    "packages/engine": {
+      "component": "engine",
+      "package-name": "@ngx-assistant/engine"
+    },
+    "packages/angular": {
+      "component": "angular",
+      "package-name": "@ngx-assistant/angular",
+      "extra-files": ["src/lib/version.ts"]
+    }
+  },
+  "plugins": [
+    { "type": "node-workspace", "merge": false, "updatePeerDependencies": true },
+    { "type": "linked-versions", "groupName": "ngx-assistant", "components": ["engine", "angular"] }
+  ]
+}

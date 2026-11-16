@@ -5,3 +5,7 @@ dist/
 coverage/
 .angular/
 pnpm-lock.yaml
+
+# Written by release-please.
+**/CHANGELOG.md
+.release-please-manifest.json

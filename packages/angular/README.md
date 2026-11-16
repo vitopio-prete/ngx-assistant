@@ -1,7 +1,7 @@
 # @ngx-assistant/angular
 
 Angular bindings (signals + dependency injection) and headless primitives for
-[`@ngx-assistant/engine`](../engine).
+[`@ngx-assistant/engine`](https://github.com/vitopio-prete/ngx-assistant/tree/main/packages/engine).
 
 ```ts
 import { ChangeDetectionStrategy, Component } from '@angular/core';
@@ -34,7 +34,8 @@ ng add @ngx-assistant/angular
   replace with a call to your model, and provides `provideLocalRuntime(() => inject(ChatModel))`.
   An app that already provides a runtime keeps it;
 - defines `process.env.NODE_ENV` in the `production` and `development` configurations of the
-  build, which turns the development checks of the engine on in development builds;
+  build, which turns the development checks of the engine on in development builds (without it
+  the engine runs as in production);
 - raises the `initial` budgets of the build to 1 MB (warning) and 2 MB (error) when they are
   lower: the engine, markdown and the styled components take about 800 kB;
 - sets up Tailwind CSS v4 (`tailwindcss`, `@tailwindcss/postcss`, `.postcssrc.json` and
@@ -1114,3 +1115,7 @@ The schematics live in `schematics/` and are compiled on their own (CommonJS, as
 loads them). Their build bundles the styled components of `packages/ui/src/lib`;
 `schematics/ui/components.json` says which entry files each generator starts from, and the build
 adds every file they import.
+
+## Changelog
+
+See [`CHANGELOG.md`](https://github.com/vitopio-prete/ngx-assistant/blob/main/packages/angular/CHANGELOG.md).
