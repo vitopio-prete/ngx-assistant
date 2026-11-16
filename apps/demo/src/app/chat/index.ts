@@ -5,6 +5,7 @@
 export * from './icons';
 export * from './thread/thread';
 export * from './thread/thread-welcome';
+export * from './thread/thread-suggestions';
 export * from './thread/composer';
 export * from './thread/attachment';
 export * from './thread/user-message';

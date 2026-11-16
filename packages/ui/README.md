@@ -6,32 +6,33 @@ and the texts are yours. This folder is their source, with their tests and a pre
 
 ## What is here
 
-| File                                 | Component                 | What it does                                                                                                            |
-| ------------------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `thread/thread.ts`                   | `<nxa-thread>`            | The whole chat: welcome screen, messages, a viewport that follows the reply, a button back to the bottom, the composer. |
-| `thread/thread-welcome.ts`           | `<nxa-thread-welcome>`    | The greeting of an empty thread and its suggestions.                                                                    |
-| `thread/composer.ts`                 | `<nxa-composer>`          | Message field, attachments (picked, pasted or dropped), Send and Stop.                                                  |
-| `thread/user-message.ts`             | `<nxa-user-message>`      | A user message as typed, its attachments, Edit and Copy, the branch picker.                                             |
-| `thread/assistant-message.ts`        | `<nxa-assistant-message>` | A reply: markdown, reasoning, tool calls, files, the error of a failed run, its actions, the branch picker.             |
-| `thread/edit-composer.ts`            | `<nxa-edit-composer>`     | The edit form that replaces a user message while it is edited.                                                          |
-| `thread/markdown-text.ts`            | `<nxa-markdown-text>`     | Text as markdown (markdown-it, raw HTML shown as text), revealed smoothly while it streams.                             |
-| `thread/reasoning.ts`                | `<nxa-reasoning>`         | Consecutive reasoning parts in one disclosure, open while the model reasons.                                            |
-| `thread/tool-fallback.ts`            | `<nxa-tool-fallback>`     | A tool call without a UI of its own: status, duration, arguments, result, and the controls that answer it.              |
-| `thread/tool-approval.ts`            | `<nxa-tool-approval>`     | The approval request of a tool call: decision, options with confirmation, typed answer, questionnaire, then a receipt.  |
-| `thread/attachment.ts`               | `<nxa-attachment>`        | An attachment tile with an image preview.                                                                               |
-| `thread/branch-picker.ts`            | `<nxa-branch-picker>`     | `‹ 2 / 3 ›` between the branches of a message.                                                                          |
-| `thread/message-error.ts`            | `<nxa-message-error>`     | The error of a message, announced when it appears.                                                                      |
-| `thread/message-file.ts`             | `<nxa-message-file>`      | An image or file part of a message.                                                                                     |
-| `thread/focus-keeper.ts`             | `[nxaFocusKeeper]`        | Moves the keyboard focus to the next control when the focused one goes away.                                            |
-| `thread-list/thread-list.ts`         | `<nxa-thread-list>`       | A sidebar list: New Thread, a search, the threads grouped by day, Load more, the archived threads.                      |
-| `thread-list/thread-list-item.ts`    | `<nxa-thread-list-item>`  | A row: the title, a spinner while the thread runs, a menu with Rename, Archive, Delete (Restore for an archived one).   |
-| `assistant-modal/assistant-modal.ts` | `<nxa-assistant-modal>`   | A floating chat: a button in the corner opens the thread and a Threads view; resizable, opens when a reply starts.      |
-| `model-selector/model-selector.ts`   | `<nxa-model-selector>`    | The chosen model and effort, and a panel to pick them; the choice goes to every run.                                    |
-| `tool-ui/approval-card.ts`           | `<nxa-approval-card>`     | A ready approval request for a tool UI of your own: title, command, details, Allow / Deny, then a receipt.              |
-| `menu/menu.ts`                       |                           | The classes and positions of the menus.                                                                                 |
-| `tooltip/tooltip.ts`                 | `[nxaTooltip]`            | The name of an icon button beside it, on hover or keyboard focus.                                                       |
-| `icons.ts`                           | `<nxa-icon>`              | The inline SVG icons.                                                                                                   |
-| `styles/nxa-theme.css`               |                           | The theme tokens, light and dark, the markdown typography and the entrance motion.                                      |
+| File                                 | Component                  | What it does                                                                                                            |
+| ------------------------------------ | -------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `thread/thread.ts`                   | `<nxa-thread>`             | The whole chat: welcome screen, messages, a viewport that follows the reply, a button back to the bottom, the composer. |
+| `thread/thread-welcome.ts`           | `<nxa-thread-welcome>`     | The greeting of an empty thread.                                                                                        |
+| `thread/thread-suggestions.ts`       | `<nxa-thread-suggestions>` | The suggestions of an empty thread, as a list or as cards; picking one sends it.                                        |
+| `thread/composer.ts`                 | `<nxa-composer>`           | Message field, attachments (picked, pasted or dropped), Send and Stop.                                                  |
+| `thread/user-message.ts`             | `<nxa-user-message>`       | A user message as typed, its attachments, Edit and Copy, the branch picker.                                             |
+| `thread/assistant-message.ts`        | `<nxa-assistant-message>`  | A reply: markdown, reasoning, tool calls, files, the error of a failed run, its actions, the branch picker.             |
+| `thread/edit-composer.ts`            | `<nxa-edit-composer>`      | The edit form that replaces a user message while it is edited.                                                          |
+| `thread/markdown-text.ts`            | `<nxa-markdown-text>`      | Text as markdown (markdown-it, raw HTML shown as text), revealed smoothly while it streams.                             |
+| `thread/reasoning.ts`                | `<nxa-reasoning>`          | Consecutive reasoning parts in one disclosure, open while the model reasons.                                            |
+| `thread/tool-fallback.ts`            | `<nxa-tool-fallback>`      | A tool call without a UI of its own: status, duration, arguments, result, and the controls that answer it.              |
+| `thread/tool-approval.ts`            | `<nxa-tool-approval>`      | The approval request of a tool call: decision, options with confirmation, typed answer, questionnaire, then a receipt.  |
+| `thread/attachment.ts`               | `<nxa-attachment>`         | An attachment tile with an image preview.                                                                               |
+| `thread/branch-picker.ts`            | `<nxa-branch-picker>`      | `‹ 2 / 3 ›` between the branches of a message.                                                                          |
+| `thread/message-error.ts`            | `<nxa-message-error>`      | The error of a message, announced when it appears.                                                                      |
+| `thread/message-file.ts`             | `<nxa-message-file>`       | An image or file part of a message.                                                                                     |
+| `thread/focus-keeper.ts`             | `[nxaFocusKeeper]`         | Moves the keyboard focus to the next control when the focused one goes away.                                            |
+| `thread-list/thread-list.ts`         | `<nxa-thread-list>`        | A sidebar list: New Thread, a search, the threads grouped by day, Load more, the archived threads.                      |
+| `thread-list/thread-list-item.ts`    | `<nxa-thread-list-item>`   | A row: the title, a spinner while the thread runs, a menu with Rename, Archive, Delete (Restore for an archived one).   |
+| `assistant-modal/assistant-modal.ts` | `<nxa-assistant-modal>`    | A floating chat: a button in the corner opens the thread and a Threads view; resizable, opens when a reply starts.      |
+| `model-selector/model-selector.ts`   | `<nxa-model-selector>`     | The chosen model and effort, and a panel to pick them; the choice goes to every run.                                    |
+| `tool-ui/approval-card.ts`           | `<nxa-approval-card>`      | A ready approval request for a tool UI of your own: title, command, details, Allow / Deny, then a receipt.              |
+| `menu/menu.ts`                       |                            | The classes and positions of the menus.                                                                                 |
+| `tooltip/tooltip.ts`                 | `[nxaTooltip]`             | The name of an icon button beside it, on hover or keyboard focus.                                                       |
+| `icons.ts`                           | `<nxa-icon>`               | The inline SVG icons.                                                                                                   |
+| `styles/nxa-theme.css`               |                            | The theme tokens, light and dark, the markdown typography and the entrance motion.                                      |
 
 Every file depends only on `@ngx-assistant/angular` (and its engine, for a few types), Angular,
 `@angular/cdk` (menus and overlay), `markdown-it` and Tailwind.
@@ -83,6 +84,12 @@ Without the schematics:
    })
    export class Chat {}
    ```
+
+A new conversation shows the composer in the middle, under the greeting, with the suggestions
+below it until something is typed; the first message moves the composer to the bottom.
+`welcomeLayout="bottom"` (on `<nxa-thread>` or `<nxa-assistant-modal>`) keeps the composer at the
+bottom instead, with the greeting and the suggestions as cards in the middle. The composer stays the
+same element in both layouts, so the draft, the attachments and the focus are kept.
 
 Tool calls use the UI registered with `provideToolUi(...)` when there is one, and
 `<nxa-tool-fallback>` otherwise. A tool UI of your own can ask for approval with
@@ -265,8 +272,9 @@ Set a token on any element to restyle what is below it, for example
 
 ### Motion
 
-Messages, the welcome and its suggestions slide in, menus zoom in, the copy icon turns into a check
-and icon buttons shrink a little when pressed. The entrances are classes of the theme, so they need
+Messages, the welcome and its suggestions slide in, menus zoom in, the copy icon turns into a check,
+icon buttons shrink a little when pressed, and the composer of a new conversation slides to the
+bottom with the first message. The entrances are classes of the theme, so they need
 nothing installed: `nxa-animate-in` fades an element in, and `nxa-slide-in-1` / `nxa-slide-in-2`,
 `nxa-zoom-in-50` / `nxa-zoom-in-75` / `nxa-zoom-in-95` and `nxa-duration-200` add a slide, a zoom
 and a longer duration. Set `--nxa-enter-duration` or `--nxa-enter-delay` on an element to change

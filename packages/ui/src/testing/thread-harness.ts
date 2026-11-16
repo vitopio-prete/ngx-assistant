@@ -9,6 +9,7 @@ export interface MountOptions {
   isRunning?: boolean;
   adapter?: Partial<ExternalStoreAdapter<ThreadMessageLike>>;
   autoFocus?: boolean;
+  welcomeLayout?: 'centered' | 'bottom';
   providers?: Provider[];
 }
 
@@ -21,6 +22,7 @@ export async function mountThread(
   options: MountOptions = {},
 ) {
   const store = signal({ messages, isRunning: options.isRunning });
+  const welcomeLayout = signal(options.welcomeLayout ?? 'centered');
   const provider = provideExternalStoreRuntime<ThreadMessageLike>(() =>
     computed((): ExternalStoreAdapter<ThreadMessageLike> => {
       const { messages: current, isRunning } = store();
@@ -38,10 +40,11 @@ export async function mountThread(
     changeDetection: ChangeDetectionStrategy.OnPush,
     imports: [NxaThread],
     providers: [provider, ...(options.providers ?? [])],
-    template: `<nxa-thread [autoFocus]="autoFocus" />`,
+    template: `<nxa-thread [autoFocus]="autoFocus" [welcomeLayout]="welcomeLayout()" />`,
   })
   class Host {
     protected readonly autoFocus = options.autoFocus ?? true;
+    protected readonly welcomeLayout = welcomeLayout;
   }
 
   const fixture = TestBed.createComponent(Host);
@@ -54,6 +57,7 @@ export async function mountThread(
     el,
     update: (next: readonly ThreadMessageLike[], nextOptions: { isRunning?: boolean } = {}) =>
       store.set({ messages: next, isRunning: nextOptions.isRunning }),
+    setWelcomeLayout: (layout: 'centered' | 'bottom') => welcomeLayout.set(layout),
   };
 }
 

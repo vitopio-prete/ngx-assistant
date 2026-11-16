@@ -117,6 +117,22 @@ describe('nxa-assistant-modal', () => {
     expect(part('thread')!.querySelector('textarea')).toBeTruthy();
   });
 
+  it('centers the composer of a new thread, or keeps it at the bottom with welcomeLayout', async () => {
+    await renderModal(makeAdapter([]));
+    await openModal();
+    const layout = () =>
+      part('thread')!.querySelector<HTMLElement>('[data-welcome-layout]')!.dataset['welcomeLayout'];
+    expect(layout()).toBe('centered');
+    const field = part('thread')!.querySelector('textarea')!;
+    field.value = 'a draft';
+    field.dispatchEvent(new Event('input'));
+
+    fixture.componentRef.setInput('welcomeLayout', 'bottom');
+    await settle(() => expect(layout()).toBe('bottom'));
+    expect(part('thread')!.querySelector('textarea')).toBe(field);
+    expect(field.value).toBe('a draft');
+  });
+
   it('lists the threads behind the threads toggle and opens the picked one', async () => {
     const adapter = makeAdapter(withTitles('Trip planning', 'Budget review'));
     await renderModal(adapter);

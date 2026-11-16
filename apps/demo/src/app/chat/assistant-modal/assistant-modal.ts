@@ -11,6 +11,7 @@ import {
   afterNextRender,
   effect,
   inject,
+  input,
   signal,
   untracked,
   viewChild,
@@ -172,7 +173,12 @@ const ICON_SWAP =
           </div>
         </div>
         <div data-slot="assistant-modal-body" class="relative min-h-0 flex-1">
-          <nxa-thread data-slot="assistant-modal-thread" class="h-full" [inert]="view() === 'list'">
+          <nxa-thread
+            data-slot="assistant-modal-thread"
+            class="h-full"
+            [welcomeLayout]="welcomeLayout()"
+            [inert]="view() === 'list'"
+          >
             <ng-content select="[nxaComposerTools]" ngProjectAs="[nxaComposerTools]" />
             <ng-content select="[nxaComposerNotice]" ngProjectAs="[nxaComposerNotice]" />
           </nxa-thread>
@@ -200,6 +206,8 @@ export class NxaAssistantModal {
   readonly open = signal(false);
   /** What the window shows. */
   readonly view = signal<AssistantModalView>('thread');
+  /** Where the composer of an empty thread goes, as `welcomeLayout` of `<nxa-thread>`. */
+  readonly welcomeLayout = input<'centered' | 'bottom'>('centered');
 
   protected readonly dialogId = `nxa-assistant-modal-${nextId}`;
   protected readonly titleId = `nxa-assistant-modal-title-${nextId++}`;
