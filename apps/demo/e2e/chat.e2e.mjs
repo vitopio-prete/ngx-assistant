@@ -1,8 +1,9 @@
 // End-to-end check of the production demo bundle in jsdom, against the backend it ships: the
 // thread, its branches, editing, regenerating, copying, attachments, errors, suggestions, tool
 // calls with an approval, the model selector, the thread list and its row menu, the assistant
-// modal, the theme, what a reload brings back, and the free models of OpenRouter: the account, the
-// models list and replies streamed through the backend, against a stand-in for OpenRouter.
+// modal, the theme, what a reload brings back, the rich replies of the Showcase model, and the free
+// models of OpenRouter: the account row, the models list, replies streamed through the backend and
+// the daily limit, against a stand-in for OpenRouter.
 // Every request to the backend and to OpenRouter is recorded and checked.
 // Run after `ng build demo`. Exits with a non-zero code on the first failed check.
 import assert from 'node:assert/strict';
@@ -124,6 +125,7 @@ async function openRouter(url, init = {}) {
   if (call.path === '/api/v1/auth/keys' && call.method === 'POST') {
     return Response.json({ key: 'sk-or-from-sign-in' });
   }
+  if (call.path === '/api/v1/key' && call.method === 'GET') return openRouterKey(call);
   if (call.path === '/api/v1/chat/completions' && call.method === 'POST') {
     return openRouterChat(call, openRouterCalls.filter((c) => c.path === call.path).length);
   }
@@ -200,6 +202,9 @@ function sse(chunks, signal, delayMs = 5) {
 
 /** A reply of the model, a few characters per chunk. */
 const words = (reply) => reply.match(/.{1,6}/g).map((piece) => delta({ content: piece }));
+
+/** What the stand-in says about a key. */
+let openRouterKey = () => Response.json({ data: { label: 'Demo key', is_free_tier: true } });
 
 openRouterModels = catalogResponse;
 openRouterChat = (call) => sse(words('Hello from OpenRouter.'), call.signal);
@@ -290,6 +295,9 @@ const chatRequests = (from = 0) =>
   requests.slice(from).filter((r) => r.method === 'POST' && r.path === '/api/chat');
 const lastChatBody = () => chatRequests().at(-1).body;
 const stored = () => JSON.parse(window.localStorage.getItem('ngx-assistant-demo'));
+const MODEL = 'ngx-assistant-demo-model';
+const EFFORT = 'ngx-assistant-demo-effort';
+const limitNotice = () => document.querySelector('[data-demo="limit-notice"]');
 
 async function waitFor(check, what, timeout = 5000) {
   const start = Date.now();
@@ -371,7 +379,8 @@ async function check(name, fn) {
   console.log(`ok - ${name}`);
 }
 
-openPage();
+// The conversations, on the Echo model, which repeats each message: picked on an earlier visit.
+openPage({ [MODEL]: 'echo' });
 
 await check('the app mounts on a new conversation, with suggestions', async () => {
   await waitFor(() => chat() && input(), 'the app to mount');
@@ -391,7 +400,7 @@ await check('the app mounts on a new conversation, with suggestions', async () =
   await waitFor(() => welcome(), 'the welcome screen');
   assert.deepEqual(
     suggestions().map((s) => text(s.querySelector('[nxaSuggestionTitle]'))),
-    ['Say hello', 'Check the weather', 'Send an email', 'Show an error'],
+    ['Write some code', 'Compare in a table', 'Plan a day in Rome', 'Send an email'],
   );
   assert.ok(isCentered(), 'the composer is in the middle, with the suggestions below it');
   type('draft');
@@ -406,7 +415,9 @@ await check('the app mounts on a new conversation, with suggestions', async () =
 });
 
 await check('the first message saves the conversation, which the backend names', async () => {
-  suggestions()[0].click();
+  type('Hello there!');
+  await waitFor(() => !sendButton().disabled, 'send to enable');
+  sendButton().click();
   await waitFor(isRunning, 'the run to start');
   await idle();
   assert.deepEqual(messages(), [
@@ -755,7 +766,7 @@ await check('the model picker sits in the composer, with an icon per model', asy
   // The simulated models, then the free models of OpenRouter that answer in text, by name.
   assert.deepEqual(
     items.map((item) => text(item.querySelector('[data-slot="model-selector-item-name"]'))),
-    ['Echo', 'Shout', 'Acme: Unknown 1', 'Google: Gemma 4 31B', 'OpenAI: gpt-oss-20b'],
+    ['Showcase', 'Echo', 'Acme: Unknown 1', 'Google: Gemma 4 31B', 'OpenAI: gpt-oss-20b'],
   );
   const icon = (item) => item.querySelector('[data-slot="model-selector-icon"]');
   assert.ok(items.every(icon));
@@ -766,7 +777,7 @@ await check('the model picker sits in the composer, with an icon per model', asy
   assert.ok(icon(items[4]).querySelector('[data-demo="model-icon-mask"]'));
   for (const item of items.slice(2)) {
     assert.equal(item.getAttribute('aria-disabled'), 'true');
-    assert.ok(text(item).includes('Connect OpenRouter to use'), text(item));
+    assert.ok(text(item).includes('Sign in to use'), text(item));
   }
   items[3].click();
   await sleep(50);
@@ -777,11 +788,12 @@ await check('the model picker sits in the composer, with an icon per model', asy
 });
 
 await check('the model picker sends the model and its effort with every run', async () => {
-  await pickModel('Shout');
-  assert.equal(modelTrigger().getAttribute('aria-label'), 'Model: Shout');
+  await pickModel('Showcase');
+  assert.equal(modelTrigger().getAttribute('aria-label'), 'Model: Showcase');
+  assert.equal(window.localStorage.getItem(MODEL), 'showcase');
   await send('quiet please');
-  assert.equal(lastReply(), 'ECHO: QUIET PLEASE');
-  assert.equal(lastChatBody().modelName, 'shout');
+  assert.ok(lastReply().startsWith('About “quiet please” Sure.'), lastReply());
+  assert.equal(lastChatBody().modelName, 'showcase');
   assert.equal(lastChatBody().reasoningEffort, undefined);
 
   await pickModel('Echo', 'High');
@@ -803,7 +815,8 @@ await check('the model picker sends the model and its effort with every run', as
   assert.equal(lastReply(), 'Echo: think first');
   assert.equal(lastChatBody().modelName, 'echo');
   assert.equal(lastChatBody().reasoningEffort, 'high');
-  await pickModel('Shout');
+  assert.equal(window.localStorage.getItem(MODEL), 'echo');
+  assert.equal(window.localStorage.getItem(EFFORT), 'high');
 });
 
 await check('a run goes on while another conversation is shown', async () => {
@@ -811,7 +824,7 @@ await check('a run goes on while another conversation is shown', async () => {
   type(words);
   await waitFor(() => !sendButton().disabled, 'send to enable');
   sendButton().click();
-  await waitFor(() => lastReply().startsWith('ECHO: STEP0'), 'the reply to stream');
+  await waitFor(() => lastReply().startsWith('Echo: step0'), 'the reply to stream');
 
   openThread('Hello there!');
   await waitFor(() => activeTitle() === 'Hello there!', 'the other conversation');
@@ -822,14 +835,14 @@ await check('a run goes on while another conversation is shown', async () => {
       stored().messages['thread-2'].items.some(
         (i) =>
           i.message.status?.type === 'complete' &&
-          i.message.content.some((p) => p.text === `ECHO: ${words.toUpperCase()}`),
+          i.message.content.some((p) => p.text === `Echo: ${words}`),
       ),
     'the run to finish in the background',
   );
 
   openThread('weather in Rome');
   await waitFor(() => activeTitle() === 'weather in Rome', 'the conversation back');
-  assert.equal(lastReply(), `ECHO: ${words.toUpperCase()}`);
+  assert.equal(lastReply(), `Echo: ${words}`);
   assert.equal(isRunning(), false);
 });
 
@@ -839,13 +852,17 @@ await check('no errors were reported other than the failures asked for', async (
   assert.match(errors[0], /Message reload failed.*Status 500: The backend failed on purpose\./);
 });
 
-const saved = { 'ngx-assistant-demo': window.localStorage.getItem('ngx-assistant-demo') };
+const saved = Object.fromEntries(
+  ['ngx-assistant-demo', MODEL, EFFORT].map((key) => [key, window.localStorage.getItem(key)]),
+);
 window.close();
 openPage(saved);
 
 await check('a reload brings back the conversations, their tools and their state', async () => {
   await waitFor(() => chat() && threadTitles().length === 2, 'the saved conversations');
   assert.deepEqual(threadTitles(), ['weather in Rome', 'Hello there!']);
+  // The model and its effort picked before the reload too.
+  assert.equal(modelTrigger().getAttribute('aria-label'), 'Model: Echo, High effort');
   assert.deepEqual(requests.map((r) => `${r.method} ${r.path}`).sort(), [
     'GET /api/models',
     'GET /api/threads',
@@ -1015,22 +1032,108 @@ await check('the theme toggle switches the page to dark and back', async () => {
   assert.deepEqual(errors, []);
 });
 
+// The Showcase model, on a new page with nothing saved: its replies show every kind of part.
+window.close();
+openPage();
+
+const reasoningOf = async (article) => {
+  const toggle = article.querySelector('[data-slot="reasoning-trigger"]');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false', 'the reasoning starts folded');
+  toggle.click();
+  await waitFor(() => article.querySelector('[data-slot="reasoning-text"]'), 'the reasoning');
+  return text(article.querySelector('[data-slot="reasoning-text"]'));
+};
+
+await check('a first visit starts on Showcase, which answers code with a code block', async () => {
+  await waitFor(() => chat() && input() && suggestions().length === 4, 'the app to mount');
+  assert.equal(modelTrigger().getAttribute('aria-label'), 'Model: Showcase');
+  suggestions()[0].click();
+  await waitFor(isRunning, 'the run to start');
+  await idle();
+  assert.equal(lastChatBody().modelName, 'showcase');
+  const article = lastAssistant();
+  assert.equal(text(article.querySelector('h2')), 'Signals in a component');
+  const code = article.querySelector('pre code');
+  assert.ok(code, 'a code block');
+  // The indentation and the blank lines of the code arrive as they were written.
+  assert.match(code.textContent, /\n {2}selector: 'app-counter',\n/);
+  assert.match(code.textContent, /} from '@angular\/core';\n\n@Component/);
+  assert.equal(article.querySelectorAll('ol > li').length, 3);
+  assert.match(await reasoningOf(article), /^The message asks for code/);
+});
+
+await check('Showcase compares in a table, and a regenerated take starts differently', async () => {
+  await send('Compare the runtimes in a table');
+  const article = lastAssistant();
+  assert.deepEqual([...article.querySelectorAll('thead th')].map(text), [
+    'Runtime',
+    'Where the messages live',
+    'Good for',
+  ]);
+  assert.equal(article.querySelectorAll('tbody tr').length, 4);
+  assert.ok(text(article).includes('Sure. Each runtime'), text(article));
+
+  button(article, 'Regenerate').click();
+  await waitFor(isRunning, 'the regeneration to start');
+  await idle();
+  assert.equal(branch(lastAssistant()), '2 / 2');
+  assert.ok(lastReply().includes('Here is another take. Each runtime'), lastReply());
+});
+
+await check('Showcase plans a day with the get_weather tool, then markdown', async () => {
+  await send('Plan a day in Rome');
+  const article = lastAssistant();
+  const card = article.querySelector('[data-tool="get_weather"]');
+  assert.ok(card, 'the tool card');
+  assert.equal(text(card.querySelector('[data-demo="tool-title"]')), 'Rome');
+  const [, temperature, condition] = /^(\d+)°C, (\w+)$/.exec(
+    text(card.querySelector('[data-demo="tool-value"]')),
+  );
+  assert.equal(text(article.querySelector('h2')), 'A day in Rome');
+  assert.deepEqual([...article.querySelectorAll('h3')].map(text), [
+    'Morning',
+    'Afternoon',
+    'Evening',
+  ]);
+  assert.ok(lastReply().includes(`It is ${temperature}°C and ${condition} in Rome`), lastReply());
+  // The reasoning comes before the tool call.
+  const parts = [...article.querySelectorAll('[data-slot="reasoning-trigger"], [data-tool]')];
+  assert.equal(parts[0].dataset.slot, 'reasoning-trigger');
+});
+
+await check('a higher effort makes the reasoning of Showcase longer', async () => {
+  await pickModel('Showcase', 'High');
+  await send('hello');
+  const article = lastAssistant();
+  assert.equal(text(article.querySelector('h2')), 'Hello!');
+  assert.equal(article.querySelectorAll('ul > li').length, 4);
+  const reasoning = await reasoningOf(article);
+  assert.ok(reasoning.startsWith('A greeting: I say who I am and list what to try.'), reasoning);
+  assert.ok(reasoning.endsWith('stay valid markdown while they stream.'), reasoning);
+  assert.equal(lastChatBody().reasoningEffort, 'high');
+  assert.deepEqual(errors, []);
+});
+
 // The free models of OpenRouter, on a new page with nothing saved.
 window.close();
 openPage();
 
-const panelToggle = () => document.querySelector('[data-demo="openrouter-toggle"]');
+const signInRow = () => document.querySelector('[data-demo="account-sign-in"]');
+const accountRow = () => document.querySelector('[data-demo="account-menu-trigger"]');
+const accountMenu = () => document.querySelector('[data-demo="account-menu"]');
 const panel = () => document.getElementById('demo-openrouter-panel');
-const connectLink = () => panel().querySelector('[data-demo="openrouter-connect"]');
-const panelError = () => text(panel().querySelector('[data-demo="openrouter-error"]'));
+const connectLink = () => panel()?.querySelector('[data-demo="openrouter-connect"]');
+const panelError = () => text(panel()?.querySelector('[data-demo="openrouter-error"]'));
+const LIMIT = 'ngx-assistant-demo-openrouter-limit';
+const GEMMA = 'openrouter/google/gemma-4-31b-it:free';
 const chatCalls = () => openRouterCalls.filter((c) => c.path === '/api/v1/chat/completions');
 const lastCall = () => chatCalls().at(-1);
 const KEY = 'ngx-assistant-demo-openrouter-key';
 const SIGN_IN = 'ngx-assistant-demo-openrouter-sign-in';
 
 async function openPanel() {
-  if (panelToggle().getAttribute('aria-expanded') !== 'true') panelToggle().click();
-  await waitFor(() => !panel().hidden, 'the OpenRouter panel');
+  if (!panel()) signInRow().click();
+  await waitFor(panel, 'the sign-in panel');
 }
 
 async function pasteKey(key) {
@@ -1038,15 +1141,20 @@ async function pasteKey(key) {
   const field = panel().querySelector('#demo-openrouter-key');
   field.value = key;
   panel().querySelector('form').requestSubmit();
-  await waitFor(() => panel().querySelector('[data-demo="openrouter-disconnect"]'), 'the account');
+  await waitFor(accountRow, 'the account row');
 }
 
-await check('Connect OpenRouter goes to its sign-in with a PKCE challenge', async () => {
-  await waitFor(() => chat() && input() && panelToggle(), 'the app to mount');
-  assert.equal(text(panelToggle()), 'OpenRouter (not connected)');
-  assert.equal(panel().hidden, true);
+await check('Sign in with OpenRouter goes to its sign-in with a PKCE challenge', async () => {
+  await waitFor(() => chat() && input() && signInRow(), 'the app to mount');
+  // The account row is at the bottom of the sidebar, under the conversations.
+  assert.ok(signInRow().closest('[data-slot="thread-list-footer"]'), 'in the sidebar footer');
+  assert.ok(text(signInRow()).startsWith('Sign in with OpenRouter'), text(signInRow()));
+  assert.equal(signInRow().getAttribute('aria-expanded'), 'false');
+  assert.equal(panel(), null);
   await openPanel();
-  assert.equal(panelToggle().getAttribute('aria-expanded'), 'true');
+  assert.equal(signInRow().getAttribute('aria-expanded'), 'true');
+  assert.equal(panel().getAttribute('role'), 'dialog');
+  await waitFor(() => document.activeElement === panel(), 'the focus in the panel');
   await waitFor(() => connectLink().getAttribute('href'), 'the sign-in address');
   const url = new URL(connectLink().href);
   assert.equal(`${url.origin}${url.pathname}`, 'https://openrouter.ai/auth');
@@ -1059,11 +1167,22 @@ await check('Connect OpenRouter goes to its sign-in with a PKCE challenge', asyn
     new TextEncoder().encode(pending.verifier),
   );
   assert.equal(url.searchParams.get('code_challenge'), Buffer.from(digest).toString('base64url'));
-  // Escape closes the panel, back to its button.
+  // Tab past the end of the panel closes it, back to its row: the panel is at the end of the page.
+  const save = button(panel(), 'Save');
+  save.focus();
+  save.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+  await waitFor(() => !panel(), 'the panel to close');
+  assert.equal(document.activeElement, signInRow());
+  assert.equal(signInRow().getAttribute('aria-controls'), null);
+  await openPanel();
+
+  // Escape closes the panel, back to its row.
   panel().querySelector('input').focus();
-  panel().dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  await waitFor(() => panel().hidden, 'the panel to close');
-  assert.equal(document.activeElement, panelToggle());
+  panel()
+    .querySelector('input')
+    .dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await waitFor(() => !panel(), 'the panel to close');
+  assert.equal(document.activeElement, signInRow());
 });
 
 await check('a model of OpenRouter without an account fails with a reason', async () => {
@@ -1076,7 +1195,7 @@ await check('a model of OpenRouter without an account fails with a reason', asyn
     }),
   });
   assert.equal(response.status, 401);
-  assert.equal(await response.text(), 'Connect OpenRouter to use this model.');
+  assert.equal(await response.text(), 'Sign in with OpenRouter to use this model.');
   assert.deepEqual(chatCalls(), []);
 });
 
@@ -1085,9 +1204,16 @@ await check(
   async () => {
     await pasteKey('  sk-or-pasted  ');
     assert.equal(window.localStorage.getItem(KEY), 'sk-or-pasted');
-    assert.equal(text(panelToggle()), 'OpenRouter (connected)');
-    assert.equal(document.activeElement, panelToggle());
-    panelToggle().click();
+    assert.equal(panel(), null);
+    await waitFor(() => document.activeElement === accountRow(), 'the focus on the account row');
+    // The name of the key, as OpenRouter gives it.
+    await waitFor(
+      () =>
+        text(accountRow().querySelector('[data-demo="account-label"]')) === 'Demo key · Free tier',
+      'the name of the key',
+    );
+    const keyCall = openRouterCalls.find((c) => c.path === '/api/v1/key');
+    assert.equal(keyCall.authorization, 'Bearer sk-or-pasted');
 
     await pickModel('Google: Gemma 4 31B', 'High');
     assert.equal(
@@ -1408,14 +1534,59 @@ await check('a model without tools gets the conversation without them', async ()
 await check('OpenRouter refusing the request shows its reason', async () => {
   openRouterChat = () =>
     Response.json(
-      { error: { code: 429, message: 'Rate limit exceeded: free-models-per-day' } },
+      { error: { code: 429, message: 'Rate limit exceeded: free-models-per-minute' } },
       { status: 429 },
     );
   await send('one more');
   assert.equal(
     text(lastAssistant().querySelector('[role="alert"]')),
-    'Status 429: OpenRouter: Rate limit exceeded: free-models-per-day',
+    'Status 429: OpenRouter: Rate limit exceeded: free-models-per-minute',
   );
+  // The limit of a minute is only an error: no notice.
+  assert.equal(limitNotice(), null);
+  assert.equal(window.localStorage.getItem(LIMIT), null);
+});
+
+await check('the daily limit shows a notice above the composer until Use Showcase', async () => {
+  const reset = Date.now() + 3 * 60 * 60 * 1000;
+  openRouterChat = () =>
+    Response.json(
+      {
+        error: {
+          code: 429,
+          message: 'Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000.',
+          metadata: { headers: { 'X-RateLimit-Limit': '50', 'X-RateLimit-Reset': String(reset) } },
+        },
+      },
+      { status: 429 },
+    );
+  await send('the fifty-first');
+  assert.match(
+    text(lastAssistant().querySelector('[role="alert"]')),
+    /^Status 429: OpenRouter: Rate limit exceeded: free-models-per-day/,
+  );
+  await waitFor(limitNotice, 'the notice');
+  assert.ok(composerForm().parentElement.contains(limitNotice()), 'the notice is by the composer');
+  // A live region already in the page says it.
+  const status = document.querySelector('[data-demo="limit-status"]');
+  assert.equal(status.getAttribute('role'), 'status');
+  assert.ok(text(limitNotice()).startsWith(text(status)), text(status));
+  // The day is said too when the reset is not today.
+  const today = new Date().toDateString() === new Date(reset).toDateString();
+  const time = new window.Intl.DateTimeFormat(undefined, {
+    ...(today ? {} : { weekday: 'long' }),
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(reset);
+  assert.ok(text(limitNotice()).includes(`They come back at ${time}.`), text(limitNotice()));
+  assert.equal(window.localStorage.getItem(LIMIT), String(reset));
+
+  // Another model of OpenRouter shares the limit; a simulated one does not need it.
+  button(limitNotice(), 'Use Showcase').click();
+  await waitFor(() => !limitNotice(), 'the notice to go');
+  assert.equal(modelTrigger().getAttribute('aria-label'), 'Model: Showcase, High effort');
+  await pickModel('Google: Gemma 4 31B');
+  await waitFor(limitNotice, 'the notice back with an OpenRouter model');
 });
 
 await check('an error in the middle of the stream keeps the text and shows the error', async () => {
@@ -1445,25 +1616,37 @@ await check('Stop aborts the request to OpenRouter', async () => {
   assert.ok(lastReply().length < 'word '.repeat(200).trim().length);
 });
 
-await check('Disconnect forgets the key, and the picked model gives way to Echo', async () => {
-  await openPanel();
-  const disconnect = panel().querySelector('[data-demo="openrouter-disconnect"]');
-  disconnect.focus();
-  disconnect.click();
-  await waitFor(() => connectLink(), 'the account to go');
-  assert.equal(document.activeElement, panelToggle());
-  assert.equal(window.localStorage.getItem(KEY), null);
-  // The effort picked for Gemma stays, and Echo has efforts too.
-  await waitFor(
-    () => modelTrigger().getAttribute('aria-label') === 'Model: Echo, High effort',
-    'Echo',
+await check('Disconnect forgets the key and the limit, and Showcase stands in', async () => {
+  accountRow().click();
+  await waitFor(accountMenu, 'the account menu');
+  assert.equal(
+    accountMenu().querySelector('[data-demo="account-manage"]').href,
+    'https://openrouter.ai/settings/keys',
   );
-  panelToggle().click();
+  accountMenu().querySelector('[data-demo="openrouter-disconnect"]').click();
+  await waitFor(signInRow, 'the sign-in row');
+  await waitFor(() => document.activeElement === signInRow(), 'the focus on the sign-in row');
+  assert.equal(window.localStorage.getItem(KEY), null);
+  assert.equal(window.localStorage.getItem(LIMIT), null);
+  assert.equal(limitNotice(), null);
+  // The effort picked for Gemma stays, and Showcase has efforts too.
+  await waitFor(
+    () => modelTrigger().getAttribute('aria-label') === 'Model: Showcase, High effort',
+    'Showcase',
+  );
+  // The choice is kept, for when the account comes back.
+  assert.equal(window.localStorage.getItem(MODEL), GEMMA);
   const from = chatCalls().length;
   await send('offline again');
-  assert.equal(lastReply(), 'Echo: offline again');
+  assert.ok(lastReply().startsWith('About “offline again”'), lastReply());
   assert.equal(chatCalls().length, from);
-  assert.equal(chatRequests().at(-1).body.modelName, 'echo');
+  assert.equal(chatRequests().at(-1).body.modelName, 'showcase');
+
+  await pasteKey('sk-or-again');
+  await waitFor(
+    () => modelTrigger().getAttribute('aria-label') === 'Model: Google: Gemma 4 31B, High effort',
+    'Gemma back',
+  );
 });
 
 await check('no errors were reported on the OpenRouter page', async () => {
@@ -1473,8 +1656,10 @@ await check('no errors were reported on the OpenRouter page', async () => {
 await check('back from the sign-in, the code becomes a key and leaves the address', async () => {
   window.close();
   const pending = JSON.stringify({ verifier: 'the-verifier', state: 'the-state' });
+  // OpenRouter does not say the name of the key: the row shows the end of the key instead.
+  openRouterKey = () => new Response('Unavailable', { status: 503 });
   openPage({}, 'http://localhost/?code=the-code&state=the-state', { [SIGN_IN]: pending });
-  await waitFor(() => chat() && panelToggle(), 'the app to mount');
+  await waitFor(() => chat() && (signInRow() || accountRow()), 'the app to mount');
   await waitFor(() => window.localStorage.getItem(KEY) === 'sk-or-from-sign-in', 'the key');
   assert.equal(window.location.href, 'http://localhost/');
   assert.equal(window.sessionStorage.getItem(SIGN_IN), null);
@@ -1483,7 +1668,12 @@ await check('back from the sign-in, the code becomes a key and leaves the addres
     exchange.map((c) => [c.method, c.body]),
     [['POST', { code: 'the-code', code_verifier: 'the-verifier', code_challenge_method: 'S256' }]],
   );
-  await waitFor(() => text(panelToggle()) === 'OpenRouter (connected)', 'the account');
+  await waitFor(accountRow, 'the account row');
+  await waitFor(
+    () => text(accountRow().querySelector('[data-demo="account-label"]')) === 'sk-or-…n-in',
+    'the end of the key',
+  );
+  openRouterKey = () => Response.json({ data: { label: 'Demo key', is_free_tier: true } });
   assert.deepEqual(errors, []);
 });
 
@@ -1491,10 +1681,10 @@ await check('a code without the sign-in that asked for it is not exchanged', asy
   window.close();
   const pending = JSON.stringify({ verifier: 'the-verifier', state: 'the-state' });
   openPage({}, 'http://localhost/?code=the-code&state=another-state', { [SIGN_IN]: pending });
-  await waitFor(() => chat() && panelToggle(), 'the app to mount');
-  await openPanel();
+  await waitFor(() => chat() && signInRow(), 'the app to mount');
+  // The panel opens by itself to say why.
   await waitFor(() => panelError(), 'the error');
-  assert.equal(panelError(), 'The OpenRouter sign-in did not start here. Try Connect again.');
+  assert.equal(panelError(), 'The OpenRouter sign-in did not start here. Try to sign in again.');
   assert.equal(window.location.href, 'http://localhost/');
   assert.equal(window.localStorage.getItem(KEY), null);
   assert.deepEqual(
@@ -1503,11 +1693,35 @@ await check('a code without the sign-in that asked for it is not exchanged', asy
   );
 });
 
+await check(
+  'a saved model of OpenRouter is used once its account and the list are there',
+  async () => {
+    window.close();
+    openPage({ [MODEL]: GEMMA });
+    await waitFor(() => chat() && signInRow(), 'the app to mount');
+    await sleep(50);
+    // Signed out, the selector uses Showcase and keeps the choice.
+    assert.equal(modelTrigger().getAttribute('aria-label'), 'Model: Showcase');
+    assert.equal(window.localStorage.getItem(MODEL), GEMMA);
+
+    window.close();
+    // The daily limit reached before the reload is still there, until its reset.
+    const reset = Date.now() + 60 * 60 * 1000;
+    openPage({ [MODEL]: GEMMA, [KEY]: 'sk-or-saved', [LIMIT]: String(reset) });
+    await waitFor(
+      () => picker() && modelTrigger().getAttribute('aria-label') === 'Model: Google: Gemma 4 31B',
+      'the saved model',
+    );
+    await waitFor(limitNotice, 'the notice after the reload');
+    assert.deepEqual(errors, []);
+  },
+);
+
 await check('when OpenRouter cannot list its models, the simulated ones remain', async () => {
   window.close();
   openRouterModels = () => new Response('Service unavailable', { status: 503 });
   openPage();
-  await waitFor(() => chat() && panelToggle(), 'the app to mount');
+  await waitFor(() => chat() && signInRow(), 'the app to mount');
   await openPanel();
   await waitFor(() => panelError(), 'the error');
   assert.equal(panelError(), 'Could not load the OpenRouter models: OpenRouter answered 503');
@@ -1516,7 +1730,7 @@ await check('when OpenRouter cannot list its models, the simulated ones remain',
   await waitFor(() => !content.hidden, 'the model list');
   assert.deepEqual(
     [...content.querySelectorAll('[data-slot="model-selector-item-name"]')].map(text),
-    ['Echo', 'Shout'],
+    ['Showcase', 'Echo'],
   );
   openRouterModels = catalogResponse;
 });

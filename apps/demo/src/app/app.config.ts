@@ -9,6 +9,7 @@ import {
 import { demoAttachments } from './attachments';
 import { threadHistory, threadListAdapter } from './backend-client';
 import { openRouterHeaders } from './openrouter-account';
+import { watchOpenRouterLimit } from './openrouter-limit';
 import { EmailApproval, WeatherCard } from './tool-cards';
 
 /**
@@ -29,6 +30,8 @@ export const appConfig: ApplicationConfig = {
           sendExtraMessageFields: true,
           // The OpenRouter key of the visitor, for the backend to call the free models with.
           headers: openRouterHeaders,
+          // Tells when OpenRouter says the free requests of the day are used up.
+          onResponse: watchOpenRouterLimit,
           adapters: { attachments: demoAttachments() },
         }),
       ],

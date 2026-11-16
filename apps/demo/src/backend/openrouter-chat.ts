@@ -74,6 +74,15 @@ export function toOpenAIMessages(
   const result: OpenAIMessage[] = [
     { role: 'system', content: system ? `${SYSTEM}\n\n${system}` : SYSTEM },
   ];
+  // A call without a result (stopped before it, or a new message instead of an answer) cannot go
+  // to a model: providers refuse a tool call that no tool message answers.
+  const answered = new Set(
+    messages.flatMap((message) =>
+      message.role === 'tool'
+        ? message.content.flatMap((part) => (part.type === 'tool-result' ? [part.toolCallId] : []))
+        : [],
+    ),
+  );
   for (const message of messages) {
     if (message.role === 'system') {
       result.push({ role: 'system', content: message.content });
@@ -93,7 +102,7 @@ export function toOpenAIMessages(
       // A model without tools gets the text only: some providers refuse tool calls without tools.
       const calls = tools
         ? message.content.flatMap((part): OpenAIToolCall[] =>
-            part.type === 'tool-call'
+            part.type === 'tool-call' && answered.has(part.toolCallId)
               ? [
                   {
                     id: part.toolCallId,
@@ -126,7 +135,12 @@ export function toOpenAIMessages(
 
 /** What OpenRouter streams: OpenAI-compatible chunks, or an error. */
 interface StreamChunk {
-  error?: { message?: string; code?: number | string };
+  error?: {
+    message?: string;
+    code?: number | string;
+    /** On a 429, the rate limit headers of the provider, e.g. `X-RateLimit-Reset`. */
+    metadata?: { headers?: Record<string, string> };
+  };
   choices?: {
     delta?: {
       content?: string | null;
@@ -179,16 +193,59 @@ export async function* readEvents(body: ReadableStream<Uint8Array>): AsyncGenera
   }
 }
 
+/** The header with which the backend says a 429 is the daily limit of the free models. */
+export const LIMIT_SCOPE_HEADER = 'X-RateLimit-Scope';
+/** The header with which the backend says when that limit resets, in ms since the epoch. */
+export const LIMIT_RESET_HEADER = 'X-RateLimit-Reset';
+
+/** OpenRouter's words for the daily limit of the free models. */
+const DAILY_LIMIT = 'free-models-per-day';
+
 /** Why OpenRouter refused a request, from its JSON error when it sent one. */
 async function refusal(response: Response): Promise<string> {
+  return (await readRefusal(response)).reason;
+}
+
+async function readRefusal(response: Response) {
   const body = await response.text();
   try {
-    const message = (JSON.parse(body) as StreamChunk).error?.message;
-    if (message) return `OpenRouter: ${message}`;
+    const error = (JSON.parse(body) as StreamChunk).error;
+    if (error?.message) {
+      return { reason: `OpenRouter: ${error.message}`, headers: error.metadata?.headers };
+    }
   } catch {
     // Not JSON: the text says it.
   }
-  return `OpenRouter: ${body || response.statusText || 'request failed'}`;
+  return { reason: `OpenRouter: ${body || response.statusText || 'request failed'}` };
+}
+
+/** The value of a header in either place OpenRouter puts it, ignoring case. */
+function rateLimitHeader(
+  response: Response,
+  headers: Record<string, string> | undefined,
+  name: string,
+): string | undefined {
+  const own = Object.entries(headers ?? {}).find(
+    ([key]) => key.toLowerCase() === name.toLowerCase(),
+  );
+  return own?.[1] ?? response.headers.get(name) ?? undefined;
+}
+
+/**
+ * The response to a request OpenRouter refused, with its status and reason. When it is the daily
+ * limit of the free models, it also says so in {@link LIMIT_SCOPE_HEADER}, and when the limit resets
+ * in {@link LIMIT_RESET_HEADER}, for the client to tell the visitor.
+ */
+async function refused(response: Response): Promise<Response> {
+  const { reason, headers } = await readRefusal(response);
+  const status = response.status || 502;
+  const out = new Headers({ 'Content-Type': 'text/plain' });
+  if (status === 429 && reason.includes(DAILY_LIMIT)) {
+    out.set(LIMIT_SCOPE_HEADER, 'day');
+    const reset = Number(rateLimitHeader(response, headers, LIMIT_RESET_HEADER));
+    if (Number.isFinite(reset) && reset > 0) out.set(LIMIT_RESET_HEADER, String(reset));
+  }
+  return new Response(reason, { status, headers: out });
 }
 
 /** Ids that stay unique across reloads, as the conversations do. */
@@ -287,7 +344,7 @@ export async function openRouterChat(
   network: Network,
 ): Promise<Response> {
   if (!authorization?.startsWith('Bearer ') || authorization.length <= 'Bearer '.length) {
-    return new Response('Connect OpenRouter to use this model.', { status: 401 });
+    return new Response('Sign in with OpenRouter to use this model.', { status: 401 });
   }
   const model = request.modelName!.slice(OPENROUTER_PREFIX.length);
   const listed = await openRouterModels(network).then(
@@ -315,9 +372,7 @@ export async function openRouterChat(
 
   // The first call fails the request itself, so its status and reason reach the client.
   const first = await call();
-  if (!first.ok || !first.body) {
-    return new Response(await refusal(first), { status: first.status || 502 });
-  }
+  if (!first.ok || !first.body) return refused(first);
 
   return uiMessageStreamResponse(async (write) => {
     write({ type: 'start' });

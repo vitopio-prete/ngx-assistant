@@ -1,8 +1,19 @@
 import { DOCUMENT } from '@angular/common';
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, inject, resource, signal } from '@angular/core';
+import { OpenRouterLimit } from './openrouter-limit';
 
 const AUTH_URL = 'https://openrouter.ai/auth';
 const KEYS_URL = 'https://openrouter.ai/api/v1/auth/keys';
+const KEY_URL = 'https://openrouter.ai/api/v1/key';
+
+/** Where the visitor manages the keys of the account, and deletes the one of the demo. */
+export const OPENROUTER_KEYS_PAGE = 'https://openrouter.ai/settings/keys';
+
+/** What OpenRouter says about the key in use, as far as the demo reads it. */
+interface KeyInfo {
+  label?: string;
+  is_free_tier?: boolean;
+}
 
 /** Where the key of the visitor is kept: in this browser only. */
 export const OPENROUTER_KEY_STORAGE = 'ngx-assistant-demo-openrouter-key';
@@ -66,6 +77,7 @@ export async function codeChallenge(verifier: string): Promise<string> {
 @Injectable({ providedIn: 'root' })
 export class OpenRouterAccount {
   private readonly document = inject(DOCUMENT);
+  private readonly limit = inject(OpenRouterLimit);
 
   private readonly apiKey = signal((currentKey = read(OPENROUTER_KEY_STORAGE) ?? undefined));
   /** Set while the code OpenRouter sent back is exchanged for a key. */
@@ -76,6 +88,35 @@ export class OpenRouterAccount {
   readonly connected = computed(() => this.apiKey() !== undefined);
   /** The key, for the `Authorization` header of the requests to the backend. */
   readonly key = this.apiKey.asReadonly();
+
+  /** What OpenRouter says about the key: its name, and whether the account is on the free tier. */
+  private readonly keyInfo = resource({
+    params: () => this.apiKey(),
+    loader: async ({ params: key, abortSignal }): Promise<KeyInfo> => {
+      const response = await fetch(KEY_URL, {
+        headers: { Authorization: `Bearer ${key}` },
+        signal: abortSignal,
+      });
+      if (!response.ok) throw new Error(`OpenRouter answered ${response.status}`);
+      return ((await response.json()) as { data?: KeyInfo }).data ?? {};
+    },
+  });
+
+  /**
+   * The name of the account row: the name of the key on OpenRouter, or the key with all but its last
+   * characters hidden while OpenRouter has not said (or cannot be reached).
+   */
+  readonly label = computed(() => {
+    const key = this.apiKey();
+    if (key === undefined) return undefined;
+    const info = this.keyInfo.hasValue() ? this.keyInfo.value() : undefined;
+    return info?.label?.trim() || `sk-or-…${key.slice(-4)}`;
+  });
+
+  /** Whether the account is on the free tier of OpenRouter, once OpenRouter has said. */
+  readonly freeTier = computed(() =>
+    this.keyInfo.hasValue() ? this.keyInfo.value().is_free_tier : undefined,
+  );
 
   /**
    * The address of OpenRouter's sign-in, which sends the visitor back to this page with a code. A
@@ -107,7 +148,7 @@ export class OpenRouterAccount {
 
     const pending = this.takePending();
     if (!pending || state !== pending.state) {
-      this.error.set('The OpenRouter sign-in did not start here. Try Connect again.');
+      this.error.set('The OpenRouter sign-in did not start here. Try to sign in again.');
       return;
     }
     this.connecting.set(true);
@@ -139,6 +180,8 @@ export class OpenRouterAccount {
     const trimmed = key.trim();
     if (!trimmed) return;
     write(OPENROUTER_KEY_STORAGE, trimmed);
+    // The daily limit belongs to the account it was reached on.
+    if (trimmed !== this.apiKey()) this.limit.clear();
     this.apiKey.set((currentKey = trimmed));
     this.error.set(undefined);
   }
@@ -146,6 +189,7 @@ export class OpenRouterAccount {
   /** Forgets the key. It still works on OpenRouter until the visitor deletes it there. */
   disconnect() {
     write(OPENROUTER_KEY_STORAGE, null);
+    this.limit.clear();
     this.apiKey.set((currentKey = undefined));
   }
 
