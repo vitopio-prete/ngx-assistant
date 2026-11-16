@@ -19,9 +19,15 @@ that talks to a streaming backend over HTTP.
   the run stops until the user approves or denies it in the browser, and the answer goes back to
   the backend as the tool result. Any other tool shows in the tool fallback.
 - **Model selector:** the model and its reasoning effort, picked in the composer, go in the model
-  context of the thread list, so every run of every conversation asks for them. Each model has an
-  icon; the free models of OpenRouter are listed but disabled, with the reason under their name,
-  until an OpenRouter account is connected.
+  context of the thread list, so every run of every conversation asks for them, and are kept in
+  `localStorage` for the next visit. Each model has an icon; the free models of OpenRouter are
+  listed but disabled, with "Sign in to use" under their name, until an OpenRouter account is
+  connected. While the chosen model cannot be used, the selector uses the first model that can
+  (Showcase), and comes back to the chosen one once it can.
+- **Account row:** "Sign in with OpenRouter" at the bottom of the sidebar (in the header of the
+  widget layout; on a narrow screen, open the sidebar with Threads), in the footer slot of the
+  thread list; once signed in, the account with a menu to
+  manage its keys or disconnect. See [Free models on OpenRouter](#free-models-on-openrouter).
 - **Real models, for free:** see [Free models on OpenRouter](#free-models-on-openrouter).
 - **Composer:** Enter to send, Shift+Enter for a new line, Stop during a run, which aborts the
   request; attach images or text files with the button, by pasting or by dropping them.
@@ -59,11 +65,21 @@ answers the `fetch` calls to `/api/` as a server would, and keeps the conversati
 `localStorage`. The app does not know: it uses plain `fetch`, and the replies are the same UI
 message streams that AI SDK's `streamText(...).toUIMessageStreamResponse()` sends.
 
-The simulated models are deterministic. Echo repeats the last message, numbers each regenerated take
-(`Echo (2): ...`) and names the attached files; the Shout model answers in capitals, and a
-reasoning effort adds a reasoning part. `weather in <city>` calls `get_weather`,
-`send an email to <address>` calls `send_email`, `/error` fails the request and `/error-stream`
-fails the reply halfway.
+The simulated models are deterministic.
+
+- **Showcase** (the model of a first visit) answers with replies written in advance, picked from
+  the words of the message (`src/backend/showcase.ts`): code (`code`, `example`, `signals`...)
+  gets a component in a code block, `table` or `compare` a table of the runtimes,
+  `plan a day in <city>` calls `get_weather` and writes a plan from its result, a greeting lists
+  what to try, and anything else a reply with headings, lists, a table and a code block. Each reply
+  starts with its reasoning, which a higher effort makes longer, and streams a word at a time, so
+  the markdown is shown as it arrives. A regenerated take starts differently, and the attached
+  files are named at the end.
+- **Echo** repeats the last message, numbers each regenerated take (`Echo (2): ...`) and names the
+  attached files; a reasoning effort adds a reasoning part.
+
+With both, `weather in <city>` calls `get_weather`, `send an email to <address>` calls
+`send_email`, `/error` fails the request and `/error-stream` fails the reply halfway.
 
 ## Free models on OpenRouter
 
@@ -72,10 +88,13 @@ ends with `:free`), on the visitor's own account: the demo has no key and no ser
 it costs nothing to run.
 
 1. Create an OpenRouter account (free).
-2. Open **OpenRouter** in the header of the demo and pick **Connect OpenRouter**. OpenRouter asks
-   you to sign in and approve, then sends you back to the demo, which exchanges the code it got for
-   a key (OAuth with PKCE, in the browser). Or paste a key you made on OpenRouter.
+2. Pick **Sign in with OpenRouter** at the bottom of the sidebar, then **Continue to OpenRouter**.
+   OpenRouter asks you to sign in and approve, then sends you back to the demo, which exchanges the
+   code it got for a key (OAuth with PKCE, in the browser). Or paste a key you made on OpenRouter.
 3. Pick a model in the composer and write.
+
+Once signed in, the row shows the account with the name of its key (from OpenRouter's
+`GET /api/v1/key`), and its menu links to the keys page of OpenRouter or disconnects.
 
 The key is kept in this browser's `localStorage` until **Disconnect**. The client sends it to its
 backend in the `Authorization` header (the `headers` option of `provideDataStreamRuntime`), as an
@@ -96,7 +115,13 @@ too. Disconnecting forgets the key here; delete it on OpenRouter to revoke it.
   them.
 - **Limits:** free models allow 20 requests a minute, and 50 a day per account (1000 once the
   account has bought 10 credits). A refused request shows OpenRouter's reason, with no retry.
-  Conversation titles stay simulated, so they do not count.
+  Conversation titles stay simulated, so they do not count. When OpenRouter refuses a request for
+  the daily limit (`free-models-per-day`), the backend says so in the `X-RateLimit-Scope: day` and
+  `X-RateLimit-Reset` headers of its 429; the app reads them in the `onResponse` of
+  `provideDataStreamRuntime` and, while a model of OpenRouter is chosen, shows a notice above the
+  composer (its `nxaComposerNotice` slot) with the time of the reset and a button to use Showcase.
+  The end of the limit is kept in `localStorage` until then, or until the account is disconnected
+  or another key is used.
 
 The logos are from [Lobe Icons](https://github.com/lobehub/lobe-icons) (MIT, see
 `public/providers/LICENSE`), unchanged. Model names and logos are trademarks of their owners, used
