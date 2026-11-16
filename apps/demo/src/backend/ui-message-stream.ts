@@ -74,16 +74,37 @@ export function uiMessageStreamResponse(
 
 let nextPartId = 0;
 
-/** Streams `text` as one text part, a word at a time. */
-export async function writeText(write: WriteChunk, pause: Pause, text: string, delayMs: number) {
-  const id = `text-${++nextPartId}`;
-  write({ type: 'text-start', id });
-  const words = text.split(' ').filter(Boolean);
-  for (const [index, word] of words.entries()) {
+/** Streams `text` as one part of `type`, a word at a time, keeping its spaces and line breaks. */
+async function writeStreamed(
+  write: WriteChunk,
+  pause: Pause,
+  type: 'text' | 'reasoning',
+  text: string,
+  delayMs: number,
+) {
+  const id = `${type}-${++nextPartId}`;
+  write({ type: `${type}-start`, id });
+  // Each word with the spaces before it: indented code and blank lines arrive as they are.
+  for (const word of text.trimStart().match(/\s*\S+/g) ?? []) {
     await pause(delayMs);
-    write({ type: 'text-delta', id, delta: index === 0 ? word : ` ${word}` });
+    write({ type: `${type}-delta`, id, delta: word });
   }
-  write({ type: 'text-end', id });
+  write({ type: `${type}-end`, id });
+}
+
+/** Streams `text` as one text part, a word at a time. */
+export function writeText(write: WriteChunk, pause: Pause, text: string, delayMs: number) {
+  return writeStreamed(write, pause, 'text', text, delayMs);
+}
+
+/** Streams `text` as one reasoning part, a word at a time. */
+export function writeStreamedReasoning(
+  write: WriteChunk,
+  pause: Pause,
+  text: string,
+  delayMs: number,
+) {
+  return writeStreamed(write, pause, 'reasoning', text, delayMs);
 }
 
 /** Writes `text` as one reasoning part. */
